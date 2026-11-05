@@ -1,0 +1,687 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%230b0d11'/%3E%3Ctext x='16' y='22' font-size='16' text-anchor='middle' fill='%23d9a85f' font-family='serif'%3E侨%3C/text%3E%3C/svg%3E" />
+<title>AI 智能讲解员 · 侨乡江门</title>
+<script>
+  // import maps 兼容检测：过旧内核（旧 Safari / 低版本微信 WKWebView）直接给明确提示，避免无解释白屏。
+  // 不再全局覆写 console.warn——被屏蔽的弃用告警本身就是问题线索
+  (function () {
+    var ok = false;
+    try { ok = !!(window.HTMLScriptElement && HTMLScriptElement.supports && HTMLScriptElement.supports('importmap')); } catch (e) { ok = false; }
+    if (ok) return;
+    var show = function () {
+      var tip = document.getElementById('loadTip');
+      var load = document.getElementById('loading');
+      if (tip) tip.textContent = '当前浏览器内核过旧（不支持 import maps），请换用新版 Chrome / Edge / Safari 16.4+ 打开';
+      if (load) load.style.color = '#e0897c';
+    };
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', show);
+    else show();
+  })();
+</script>
+<script type="importmap">
+{
+  "imports": {
+    "three": "/vendor/three.module.js",
+    "three/addons/": "/vendor/addons/",
+    "@pixiv/three-vrm": "/vendor/three-vrm.module.js",
+    "@pixiv/three-vrm-animation": "/vendor/three-vrm-animation.module.js"
+  }
+}
+</script>
+<style>
+  :root{
+    --accent:#d9a85f;
+    --accent2:#4fa3a5;
+    --ink:#efeae0;
+    --dim:#9a9488;
+    --faint:#6b665c;
+    --glass:rgba(11,13,17,.72);
+    --line:rgba(217,168,95,.16);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%;overflow:hidden;background:#06080b;color:var(--ink);
+    font-family:"Microsoft YaHei","PingFang SC",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+  #scene{position:fixed;inset:0;width:100%;height:100%;display:block}
+  .vignette{position:fixed;inset:0;pointer-events:none;
+    background:radial-gradient(ellipse at 50% 42%,transparent 30%,rgba(3,4,6,.55) 78%,rgba(3,4,6,.92) 100%)}
+  button{font-family:inherit;cursor:pointer}
+
+  /* ─────────── 顶栏 ─────────── */
+  .topbar{position:fixed;left:0;right:0;top:0;display:flex;justify-content:space-between;
+    align-items:flex-start;padding:34px 44px 0;z-index:8;pointer-events:none}
+  .brand .bar{width:2px;height:40px;background:linear-gradient(180deg,var(--accent),transparent);margin-bottom:12px}
+  .brand h1{font-family:"Songti SC","SimSun",serif;font-size:24px;font-weight:600;letter-spacing:.22em}
+  .brand p{margin-top:7px;font-size:11px;letter-spacing:.34em;color:var(--dim)}
+
+  .topright{display:flex;flex-direction:column;align-items:flex-end;gap:12px;pointer-events:auto}
+  .status{display:flex;align-items:center;gap:9px;font-size:12px;letter-spacing:.18em;color:var(--dim)}
+  .mode-tag{display:none;font-size:10px;letter-spacing:.16em;color:#d8b07a;
+    border:1px solid rgba(217,168,95,.4);background:rgba(217,168,95,.08);
+    padding:4px 9px;border-radius:2px}
+  body.no-avatar .mode-tag{display:inline-block}
+  /* 模型后台加载：到位前给个明示，别让人以为展台本来就这样 */
+  .ready-tag{display:none;font-size:10px;letter-spacing:.16em;color:var(--dim);
+    border:1px solid var(--line);background:rgba(255,255,255,.03);
+    padding:4px 9px;border-radius:2px}
+  .ready-tag.on{display:inline-block}
+  .dot{width:6px;height:6px;border-radius:50%;background:var(--accent2);box-shadow:0 0 10px var(--accent2)}
+  .dot.listen{background:#7fd0a0;box-shadow:0 0 12px #7fd0a0;animation:pulse 1.2s infinite}
+  .dot.think{background:var(--accent);box-shadow:0 0 12px var(--accent);animation:pulse 1s infinite}
+  .dot.speak{background:#8fb8ff;box-shadow:0 0 12px #8fb8ff;animation:pulse 1.6s infinite}
+  .dot.err{background:#d96b5f;box-shadow:0 0 12px #d96b5f}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.32}}
+
+  .nav{display:flex;gap:6px}
+  .nav button{padding:8px 15px;font-size:12px;letter-spacing:.14em;color:#a9a396;
+    border:1px solid var(--line);background:rgba(255,255,255,.02);border-radius:2px;transition:.22s}
+  .nav button:hover{color:var(--ink);border-color:rgba(217,168,95,.45)}
+  .nav button.on{color:#0a0c0f;background:var(--accent);border-color:var(--accent);font-weight:600}
+  .themes{display:flex;gap:6px}
+
+  /* ─────────── 抽屉 ─────────── */
+  .drawer{position:fixed;top:132px;bottom:150px;width:342px;z-index:7;
+    background:var(--glass);border:1px solid var(--line);border-radius:3px;
+    backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+    display:flex;flex-direction:column;transition:transform .34s cubic-bezier(.22,.8,.24,1),opacity .3s}
+  .drawer.left{left:44px}
+  .drawer.right{right:44px;width:322px}
+  .drawer.hide{opacity:0;pointer-events:none}
+  .drawer.left.hide{transform:translateX(-24px)}
+  .drawer.right.hide{transform:translateX(24px)}
+  .drawer .head{display:flex;justify-content:space-between;align-items:center;
+    padding:16px 18px 12px;border-bottom:1px solid rgba(255,255,255,.06)}
+  .drawer .head h2{font-size:12px;font-weight:500;letter-spacing:.24em;color:var(--accent)}
+  .drawer .head .sub{font-size:10px;letter-spacing:.16em;color:var(--faint)}
+  .drawer .body{flex:1;overflow-y:auto;padding:14px 18px 18px;scrollbar-width:thin;
+    scrollbar-color:rgba(217,168,95,.25) transparent}
+  .drawer .body::-webkit-scrollbar{width:4px}
+  .drawer .body::-webkit-scrollbar-thumb{background:rgba(217,168,95,.25);border-radius:2px}
+
+  .sect{margin-bottom:18px}
+  .sect:last-child{margin-bottom:0}
+  .sect h3{font-size:10.5px;letter-spacing:.22em;color:var(--faint);margin-bottom:9px;font-weight:500}
+  .sect p{font-size:12.5px;line-height:1.8;color:#b4ada0}
+  .sect p b{color:var(--ink);font-weight:500}
+
+  .exhibit{display:block;width:100%;text-align:left;padding:9px 11px;margin-bottom:5px;
+    border:1px solid transparent;border-radius:2px;background:rgba(255,255,255,.02);
+    color:#bdb7a9;transition:.2s}
+  .exhibit:hover{background:rgba(217,168,95,.09);border-color:rgba(217,168,95,.28);color:var(--ink)}
+  .exhibit .n{font-size:13px;letter-spacing:.08em}
+  .exhibit .b{font-size:11px;color:#7d7668;margin-top:3px;line-height:1.6}
+  .exhibit:hover .b{color:#8f887a}
+
+  .chip{display:inline-flex;align-items:center;gap:5px;padding:5px 10px;margin:0 5px 5px 0;
+    font-size:11px;color:#c3bcac;background:rgba(255,255,255,.03);
+    border:1px solid rgba(255,255,255,.07);border-radius:2px;transition:.2s}
+  .chip:hover{border-color:rgba(217,168,95,.55);color:var(--accent);background:rgba(217,168,95,.08)}
+  .chip::before{content:"›";color:var(--faint)}
+
+  .statgrid{display:grid;grid-template-columns:1fr 1fr;gap:7px}
+  .stat{padding:9px 10px;border:1px solid rgba(255,255,255,.06);border-radius:2px;background:rgba(255,255,255,.02)}
+  .stat b{display:block;font-size:15px;color:var(--accent);font-weight:500;letter-spacing:.03em}
+  .stat span{font-size:10px;color:var(--faint);letter-spacing:.1em}
+
+  /* 问答记录 */
+  .qa{padding:10px 0;border-bottom:1px dashed rgba(255,255,255,.07)}
+  .qa:last-child{border-bottom:none}
+  .qa .q{font-size:11.5px;color:var(--accent);line-height:1.6}
+  .qa .a{font-size:11.5px;color:#a9a396;line-height:1.75;margin-top:5px}
+  .qa .meta{font-size:9.5px;color:var(--faint);letter-spacing:.12em;margin-top:6px}
+  .qa.cancelled .q{color:#7a736a}
+  .qa.cancelled .a{color:#615b52;font-style:italic}
+  .empty{font-size:11.5px;color:var(--faint);line-height:1.9;text-align:center;padding:26px 10px}
+
+  /* ─────────── 底部舞台 ─────────── */
+  .stage{position:fixed;left:50%;bottom:calc(26px + var(--kb,0px));transform:translateX(-50%);width:min(880px,64vw);
+    z-index:7;display:flex;flex-direction:column;align-items:center;gap:12px}
+  /* 底部压暗一层，字幕压在亮墙上也读得清 */
+  .stage::before{content:"";position:fixed;left:0;right:0;bottom:0;height:250px;z-index:-1;
+    background:linear-gradient(to top,rgba(4,6,9,.78),rgba(4,6,9,.3) 52%,transparent);pointer-events:none}
+  .subtitle{width:100%;text-align:center;font-size:clamp(16px,1.15vw,25px);line-height:1.85;letter-spacing:.03em;
+    text-shadow:0 2px 18px rgba(0,0,0,.92);opacity:0;transform:translateY(9px);min-height:0;
+    transition:opacity .32s cubic-bezier(.22,.8,.24,1),transform .42s cubic-bezier(.2,.9,.3,1.14)}
+  .subtitle.show{opacity:1;transform:none}
+  .subtitle .who{display:block;font-size:10px;letter-spacing:.4em;color:var(--accent);margin-bottom:7px}
+  .subtitle .line{display:block}
+  .subtitle .cursor{display:inline-block;width:7px;height:15px;background:var(--accent);
+    vertical-align:-2px;animation:blink 1s steps(2) infinite}
+  @keyframes blink{0%,50%{opacity:1}51%,100%{opacity:0}}
+
+  .controls{display:flex;align-items:center;gap:7px;padding:6px 10px;border-radius:3px;
+    background:rgba(10,12,16,.55);border:1px solid rgba(255,255,255,.06);backdrop-filter:blur(10px)}
+  .controls button{padding:6px 12px;font-size:11px;letter-spacing:.1em;color:var(--dim);
+    background:transparent;border:1px solid transparent;border-radius:2px;transition:.2s}
+  .controls button:hover{color:var(--ink);border-color:rgba(217,168,95,.35)}
+  .controls button:disabled{opacity:.32;cursor:not-allowed}
+  .controls .sep{width:1px;height:14px;background:rgba(255,255,255,.08)}
+
+  /* 输入器：一块圆角卡片把输入和所有操作收进去，深墨底 + 细金线，
+     不再是一排零散的方按钮；主操作只留右下角一个圆形发送键 */
+  .composer{width:100%;background:linear-gradient(180deg,rgba(20,21,27,.95),rgba(10,11,15,.95));
+    border:1px solid rgba(217,168,95,.18);border-radius:18px;
+    box-shadow:0 18px 44px rgba(0,0,0,.5),inset 0 1px 0 rgba(255,255,255,.045);
+    backdrop-filter:blur(16px);transition:border-color .25s,box-shadow .25s}
+  .composer:focus-within{border-color:rgba(217,168,95,.5);
+    box-shadow:0 18px 44px rgba(0,0,0,.5),0 0 0 3px rgba(217,168,95,.08),inset 0 1px 0 rgba(255,255,255,.05)}
+  .composer input{display:block;width:100%;background:transparent;border:none;outline:none;
+    color:var(--ink);font-size:14.5px;letter-spacing:.02em;padding:15px 20px 2px;caret-color:var(--accent)}
+  .composer input::placeholder{color:#6c675c;letter-spacing:.04em}
+  /* 选图用的隐藏 input 不能被上面的 input 规则撑出来 */
+  .composer input[type=file]{display:none}
+  .composer .foot{display:flex;align-items:center;gap:8px;padding:4px 10px 10px 11px}
+  .tool{position:relative;display:flex;align-items:center;justify-content:center;width:34px;height:34px;
+    padding:0;border-radius:50%;background:rgba(255,255,255,.035);border:1px solid rgba(255,255,255,.09);
+    color:#9a9487;cursor:pointer;transition:border-color .2s,color .2s,background .2s}
+  .tool:hover{color:#d8cfbc;border-color:rgba(217,168,95,.4);background:rgba(217,168,95,.07)}
+  .tool svg{width:16px;height:16px;stroke:var(--accent);fill:none;stroke-width:1.7;opacity:.85;flex:0 0 auto}
+  .tool:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  /* 悬停说明：纯 CSS 气泡，不需要额外的 DOM */
+  .tool::after{content:attr(data-tip);position:absolute;bottom:calc(100% + 9px);left:50%;
+    transform:translateX(-50%) translateY(3px);white-space:nowrap;padding:6px 10px;border-radius:8px;
+    background:rgba(14,15,20,.96);border:1px solid rgba(217,168,95,.28);color:#cfc7b6;
+    font-size:11px;letter-spacing:.05em;box-shadow:0 8px 22px rgba(0,0,0,.5);
+    opacity:0;visibility:hidden;pointer-events:none;transition:opacity .18s,transform .18s}
+  .tool:hover::after,.tool:focus-visible::after{opacity:1;visibility:visible;transform:translateX(-50%) translateY(0)}
+  .foot .hint{margin-left:auto;font-size:10px;letter-spacing:.14em;color:rgba(255,255,255,.26);white-space:nowrap}
+  .shots{display:none;gap:8px;width:100%;padding:0 2px 8px;flex-wrap:wrap}
+  .shots.on{display:flex}
+  .shot{position:relative;width:58px;height:58px;border-radius:12px;overflow:hidden;
+    border:1px solid rgba(217,168,95,.3);background:#0a0c10;box-shadow:0 6px 16px rgba(0,0,0,.42)}
+  .shot img{width:100%;height:100%;object-fit:cover;display:block}
+  .shot .x{position:absolute;top:0;right:0;width:18px;height:18px;line-height:16px;font-size:12px;
+    color:#fff;background:rgba(0,0,0,.62);border:none;cursor:pointer;border-radius:0 0 0 8px}
+  .drop-hint{position:fixed;inset:0;display:none;align-items:center;justify-content:center;z-index:60;
+    background:rgba(6,8,11,.72);backdrop-filter:blur(3px);pointer-events:none}
+  .drop-hint.on{display:flex}
+  .drop-hint .box{padding:22px 34px;border:1px dashed rgba(217,168,95,.65);border-radius:4px;
+    color:var(--ink);font-size:13px;letter-spacing:.12em;background:rgba(10,12,16,.85)}
+  .send{width:36px;height:36px;border-radius:50%;flex:0 0 auto;display:flex;align-items:center;justify-content:center;
+    border:none;background:linear-gradient(180deg,#e3b571,#c9984e);color:#0b0c10;
+    box-shadow:0 4px 14px rgba(217,168,95,.26);transition:filter .2s,transform .2s,background .2s}
+  .send svg{width:16px;height:16px;stroke:#0b0c10;fill:none;stroke-width:2.1}
+  .send:hover:not(:disabled){filter:brightness(1.07);transform:translateY(-1px)}
+  .send:disabled{background:rgba(255,255,255,.07);box-shadow:none}
+  .send:disabled svg{stroke:#615d54}
+  /* 自检面板的「重新检测」是文字按钮，不能复用 36px 圆形 .send */
+  #btnRecheck{width:auto;height:auto;padding:8px 18px;border-radius:2px;font-size:11.5px;letter-spacing:.12em;color:#0b0c10;font-weight:600}
+  #btnRecheck:disabled{background:rgba(255,255,255,.07);color:#615d54;box-shadow:none}
+  .mic.rec{color:var(--accent);border-color:rgba(217,168,95,.65);background:rgba(217,168,95,.13);
+    animation:ring 1.6s infinite}
+  @keyframes ring{0%{box-shadow:0 0 0 0 rgba(217,168,95,.45)}100%{box-shadow:0 0 0 16px rgba(217,168,95,0)}}
+  .toast.err{border-color:rgba(224,137,124,.6);color:#f0d0c8;background:rgba(34,14,12,.95)}
+
+  /* 首屏快捷提问 */
+  .quick{display:flex;flex-wrap:wrap;justify-content:center;gap:7px;width:100%}
+  .quick:empty{display:none}
+  .qchip{padding:6px 13px;font-size:11.5px;letter-spacing:.06em;color:#c3bcac;
+    background:rgba(12,14,18,.62);border:1px solid rgba(217,168,95,.22);border-radius:2px;
+    backdrop-filter:blur(8px);transition:.2s}
+  .qchip:hover{color:var(--accent);border-color:rgba(217,168,95,.6);background:rgba(217,168,95,.1)}
+
+  /* 错误提示条：可重试，不自动消失 */
+  .errbar{position:fixed;left:50%;top:170px;transform:translateX(-50%) translateY(-6px);z-index:13;
+    display:none;align-items:center;gap:12px;padding:9px 12px 9px 16px;max-width:min(720px,80vw);
+    background:rgba(30,14,12,.94);border:1px solid rgba(224,137,124,.45);border-radius:2px;
+    font-size:12px;color:#e8c9c2;letter-spacing:.04em;box-shadow:0 8px 26px rgba(0,0,0,.45)}
+  .errbar.show{display:flex;transform:translateX(-50%) translateY(0)}
+  .errbar button{font-size:11.5px;letter-spacing:.1em;border-radius:2px;cursor:pointer}
+  #errRetry{padding:5px 13px;background:#e0897c;color:#1a0c0a;border:none;font-weight:600}
+  #errClose{background:none;border:none;color:#b98f88;font-size:16px;line-height:1;padding:2px 4px}
+  #errClose:hover{color:#fff}
+
+  /* 顶部提示条（非安全上下文等） */
+  .banner{position:fixed;left:50%;top:0;transform:translateX(-50%) translateY(-100%);z-index:14;
+    padding:9px 22px;font-size:11.5px;letter-spacing:.08em;color:#f0d9b5;
+    background:rgba(60,40,16,.96);border:1px solid rgba(217,168,95,.45);border-top:none;
+    border-radius:0 0 3px 3px;transition:.3s;max-width:90vw;text-align:center}
+  .banner.show{transform:translateX(-50%) translateY(0)}
+
+  .fallback .fallback-btn{margin-top:18px;padding:8px 20px;font-size:11.5px;letter-spacing:.14em;
+    color:#0a0c0f;background:var(--accent);border:none;border-radius:2px}
+  .fallback .why{color:#a08c6a}
+
+  /* 演示模式条 */
+  .demo{position:fixed;left:44px;bottom:150px;width:342px;z-index:7;
+    background:var(--glass);border:1px solid rgba(217,168,95,.3);border-radius:3px;
+    backdrop-filter:blur(14px);padding:15px 17px;display:none}
+  .demo.show{display:block}
+  .demo .idx{font-size:10px;letter-spacing:.24em;color:var(--accent);margin-bottom:6px}
+  .demo .title{font-size:14px;letter-spacing:.06em;margin-bottom:4px}
+  .demo .dur{font-size:10px;color:var(--faint);letter-spacing:.14em}
+  .demo ul{margin:9px 0 12px;padding-left:0;list-style:none}
+  .demo li{font-size:11.5px;color:#a9a396;line-height:1.8;padding-left:13px;position:relative}
+  .demo li::before{content:"";position:absolute;left:0;top:9px;width:4px;height:4px;border-radius:50%;background:rgba(217,168,95,.5)}
+  .demo .row{display:flex;gap:6px}
+  .demo .row button{flex:1;padding:7px;font-size:11px;letter-spacing:.1em;color:var(--dim);
+    background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.08);border-radius:2px;transition:.2s}
+  .demo .row button:hover{color:var(--ink);border-color:rgba(217,168,95,.4)}
+  .demo .row button.primary{color:#0a0c0f;background:var(--accent);border-color:var(--accent);font-weight:600}
+  .demo .bar{display:flex;gap:3px;margin-bottom:11px}
+  .demo .bar i{flex:1;height:2px;background:rgba(255,255,255,.1);border-radius:1px}
+  .demo .bar i.done{background:rgba(217,168,95,.45)}
+  .demo .bar i.cur{background:var(--accent)}
+
+  /* ─────────── 弹层 ─────────── */
+  .modal{position:fixed;inset:0;z-index:15;display:none;align-items:center;justify-content:center;
+    background:rgba(4,5,7,.72);backdrop-filter:blur(6px)}
+  .modal.show{display:flex}
+  .sheet{width:min(1010px,90vw);max-height:82vh;display:flex;flex-direction:column;position:relative;
+    background:rgb(13,15,19);border:1px solid rgba(217,168,95,.24);border-radius:3px;overflow:hidden}
+  /* 右下角一枚极淡的竖排「侨批」水印，给弹层一点纸面感，不是通用模板底纹 */
+  .sheet::after{content:"侨批";position:absolute;right:24px;top:96px;pointer-events:none;
+    writing-mode:vertical-rl;font-family:"Songti SC","SimSun",serif;
+    font-size:46px;letter-spacing:.22em;color:rgba(217,168,95,.055)}
+  .sheet .top{display:flex;justify-content:space-between;align-items:center;padding:18px 24px;
+    border-bottom:1px solid rgba(255,255,255,.07)}
+  .sheet .top h2{font-size:13px;letter-spacing:.24em;color:var(--accent);font-weight:500}
+  .sheet .top .x{background:none;border:none;color:var(--dim);font-size:19px;line-height:1;padding:2px 6px}
+  .sheet .top .x:hover{color:var(--ink)}
+  .tabs{display:flex;gap:2px;padding:12px 24px 0;border-bottom:1px solid rgba(255,255,255,.06)}
+  .tabs button{padding:8px 15px;font-size:11.5px;letter-spacing:.1em;color:var(--dim);
+    background:none;border:none;border-bottom:2px solid transparent;transition:.2s}
+  .tabs button.on{color:var(--accent);border-bottom-color:var(--accent)}
+  .panes{flex:1;overflow-y:auto;padding:22px 24px 28px}
+  .pane{display:none}
+  .pane.on{display:block}
+
+  .arch{display:flex;flex-direction:column;gap:8px;margin-bottom:20px}
+  .layer{display:flex;align-items:center;gap:14px;padding:13px 16px;border:1px solid rgba(255,255,255,.07);
+    border-radius:2px;background:linear-gradient(90deg,rgba(217,168,95,.06),transparent 60%)}
+  .layer .k{width:66px;font-size:10px;letter-spacing:.16em;color:var(--accent);flex:0 0 auto}
+  .layer .v{font-size:12px;color:#b6b0a2;line-height:1.7}
+  .layer .v em{font-style:normal;color:var(--faint);font-size:11px}
+  /* 四层链路不做四行同构：认知层是这件作品的核心，单独给一次强调 */
+  .layer.main{padding:18px 16px;border-color:rgba(217,168,95,.34);
+    background:linear-gradient(90deg,rgba(217,168,95,.1),transparent 66%)}
+  .layer.main .v{font-size:13px;color:#e2dccd}
+  .layer.main .v em{font-size:11.5px;color:#8f8878}
+
+  .mgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:18px}
+  .mcell{padding:13px 14px;border:1px solid rgba(255,255,255,.07);border-radius:2px}
+  .mcell b{display:block;font-size:19px;color:var(--accent);font-weight:500;letter-spacing:.02em}
+  .mcell span{display:block;font-size:10.5px;color:var(--faint);margin-top:4px;letter-spacing:.1em}
+  /* 主指标单独一行、字号拉开，避免六宫格那种“模板感” */
+  .mcell.big{grid-column:1/-1;padding:18px 20px;
+    background:linear-gradient(100deg,rgba(217,168,95,.07),transparent 62%)}
+  .mcell.big b{display:inline-block;font-size:38px;line-height:1}
+  .mcell.big span{display:inline-block;margin:0 0 0 10px;font-size:11px;vertical-align:6px}
+  .mcell.big em{display:block;margin-top:11px;font-style:normal;font-size:11px;line-height:1.7;color:#8c8676}
+  .mcell.big .mline{margin-top:9px;font-size:10.5px;color:var(--faint);letter-spacing:.1em}
+  .mcell.big .mline b{display:inline;font-size:11.5px;color:#b9b2a2}
+  .mcell.big .mline i{font-style:normal;margin:0 8px;color:#4a463e}
+
+  .cards{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .cards.two{grid-template-columns:1.4fr 1fr}
+  .cards.two .card.wide{grid-row:span 2;background:linear-gradient(160deg,rgba(217,168,95,.055),transparent 58%)}
+  .card{padding:15px 17px;border:1px solid rgba(255,255,255,.07);border-radius:2px;background:rgba(255,255,255,.015)}
+  .card h4{font-size:12px;color:var(--ink);letter-spacing:.1em;margin-bottom:8px;font-weight:500}
+  .card h4 span{float:right;font-size:10px;color:var(--accent);letter-spacing:.1em}
+  .card p{font-size:11.5px;color:#a09a8d;line-height:1.85}
+  .card.limits{border-color:rgba(224,137,124,.22);background:rgba(224,137,124,.03)}
+  .card.limits h4{color:#e0b3aa}
+  .card.limits p{color:#9a9089}
+
+  table.tbl{width:100%;border-collapse:collapse;font-size:11.5px}
+  table.tbl th,table.tbl td{text-align:left;padding:8px 10px;border-bottom:1px solid rgba(255,255,255,.07);color:#a09a8d}
+  table.tbl th{color:var(--faint);font-weight:400;font-size:10.5px;letter-spacing:.12em}
+  table.tbl td:first-child{color:#c9c3b4}
+
+  .checkrow{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid rgba(255,255,255,.06);font-size:12px}
+  .checkrow .flag{width:52px;font-size:10px;letter-spacing:.1em;text-align:center;padding:3px 0;border-radius:2px;flex:0 0 auto}
+  .checkrow .flag.ok{color:#8fd7a8;background:rgba(143,215,168,.1)}
+  .checkrow .flag.bad{color:#e0897c;background:rgba(224,137,124,.12)}
+  .checkrow .flag.wait{color:var(--dim);background:rgba(255,255,255,.05)}
+  .checkrow .name{flex:1;color:#b6b0a2}
+  .checkrow .val{color:var(--faint);font-size:11px}
+
+  .toast{position:fixed;left:50%;top:122px;transform:translate(-50%,-8px);z-index:12;
+    padding:9px 18px;font-size:11.5px;letter-spacing:.08em;color:#c9c3b4;
+    background:rgba(10,12,16,.92);border:1px solid rgba(217,168,95,.28);border-radius:2px;
+    opacity:0;pointer-events:none;transition:.3s}
+  .toast.show{opacity:1;transform:translate(-50%,0)}
+
+  /* 主题切换按钮：内联样式优先级高于类选择器，高亮态需要 !important 才能生效（OPT-06） */
+  .theme-btn.on{color:#0a0c0f !important;background:var(--accent) !important;
+    border-color:var(--accent) !important;font-weight:600}
+
+  .loading{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;z-index:20;
+    background:#06080b;transition:opacity .6s;letter-spacing:.5em;font-size:12px;color:var(--dim)}
+  .loading.hide{opacity:0;pointer-events:none}
+  .loading .tip{position:absolute;bottom:38%;letter-spacing:.2em;font-size:10.5px;color:#4b473f}
+
+  .fallback{position:fixed;inset:0;display:none;align-items:center;justify-content:center;z-index:6;
+    text-align:center;padding:0 20%}
+  .fallback.show{display:flex}
+  .fallback p{font-size:13px;line-height:2;color:#8a8578;letter-spacing:.06em}
+
+  @media (max-width:1280px){
+    .drawer{width:300px}
+    .stage{width:min(700px,58vw)}
+    .topbar{padding:24px 28px 0}
+    .drawer.left{left:28px}
+    .drawer.right{right:28px}
+    .demo{left:28px;bottom:140px;width:300px}
+  }
+
+  /* 中窄屏（≤1652px）：把左右抽屉的底边抬到舞台上方做垂直分层，
+     避免 1024~1440 宽度下居中舞台盖住左右抽屉的下部内容（DEF-13） */
+  @media (max-width:1652px){
+    .drawer{bottom:300px}
+    .demo{bottom:300px}
+  }
+
+  /* 移动端 / 窄屏：抽屉改居中悬浮、舞台铺满、输入框 ≥16px 防 iOS 聚焦缩放；
+     --kb 由 visualViewport 写入，软键盘弹出时舞台与抽屉整体上移 */
+  @media (max-width:860px){
+    .topbar{padding:calc(12px + env(safe-area-inset-top,0px)) 14px 0}
+    .brand h1{font-size:18px;letter-spacing:.14em}
+    .brand p{font-size:10px;letter-spacing:.2em}
+    .nav{flex-wrap:wrap;justify-content:flex-end;max-width:58vw}
+    .drawer{top:auto;bottom:calc(215px + var(--kb,0px));width:min(88vw,342px);max-height:44vh}
+    .drawer.left{left:50%;transform:translateX(-50%)}
+    .drawer.left.hide{transform:translateX(-50%) translateY(16px)}
+    .drawer.right{right:50%;width:min(88vw,322px);max-height:38vh;transform:translateX(50%)}
+    .drawer.right.hide{transform:translateX(50%) translateY(16px)}
+    .demo{left:14px;right:14px;width:auto;bottom:calc(225px + var(--kb,0px))}
+    .stage{width:min(94vw,700px);bottom:calc(12px + env(safe-area-inset-bottom,0px) + var(--kb,0px))}
+    .composer input{font-size:16px;padding:13px 16px 2px}
+    .errbar{top:104px;max-width:92vw}
+    .toast{top:88px;max-width:92vw}
+    .sheet{width:min(94vw,1010px);max-height:86vh}
+  }
+</style>
+</head>
+<body>
+<noscript>
+  <div style="position:fixed;inset:0;z-index:99;display:flex;align-items:center;justify-content:center;background:#06080b;color:#efeae0;font-size:14px;letter-spacing:.1em">本页面需要启用 JavaScript 才能运行讲解功能。</div>
+</noscript>
+<canvas id="scene" aria-hidden="true"></canvas>
+<div class="vignette"></div>
+
+<div class="fallback" id="fallback">
+  <div>
+    <p>当前设备未启用 3D 渲染。<span class="why">（WebGL 不可用）</span><br>讲解功能不受影响，可直接用文字或语音提问。</p>
+    <button onclick="location.reload()" class="fallback-btn">重新加载 3D</button>
+  </div>
+</div>
+
+<header class="topbar">
+  <div class="brand">
+    <div class="bar"></div>
+    <h1 id="title">侨乡 · 江门</h1>
+    <p id="subtitle-brand">AI GUIDE · 小侨</p>
+  </div>
+  <div class="topright">
+    <div class="themes" id="themes"></div>
+    <div class="mode-tag" id="modeTag">无人物模式</div>
+    <div class="ready-tag" id="readyTag"></div>
+    <div class="status"><span class="dot" id="dot"></span><span id="statusText" role="status">待机</span></div>
+    <nav class="nav">
+      <button data-act="guide" class="on">导览册</button>
+      <button data-act="tech">技术架构</button>
+      <button data-act="review">评审资料</button>
+      <button data-act="demo">演示模式</button>
+      <button data-act="selfcheck">自检</button>
+    </nav>
+  </div>
+</header>
+
+<!-- 左：导览册 -->
+<aside class="drawer left" id="guidePanel">
+  <div class="head">
+    <h2>导览册</h2>
+    <div class="sub" id="guideSub">6 个展项 · 知识库</div>
+  </div>
+  <div class="body">
+    <div class="sect">
+      <h3>项目简介</h3>
+      <p id="introText">讲解员「小侨」站在展厅里。可以按住空格说话，也可以直接打字；问到哪个展项，她会转身走过去讲，字幕跟着声音走。断网也能用。</p>
+    </div>
+
+    <div class="sect">
+      <h3>运行指标</h3>
+      <div class="statgrid" id="statGrid">
+        <div class="stat"><b id="sResp">—</b><span id="sRespNote">端到端响应</span></div>
+        <div class="stat"><b id="sKb">—</b><span>知识条目</span></div>
+        <div class="stat"><b id="sTts">—</b><span>TTS 实时率</span></div>
+        <div class="stat"><b id="sOff">100%</b><span>离线可用</span></div>
+      </div>
+    </div>
+
+    <div class="sect">
+      <h3>示例问题 · 点击填入，可改再发</h3>
+      <div id="exampleList"></div>
+      <p style="margin-top:8px;font-size:10.5px;color:#5d594f">屏幕下方还有 3 个快捷提问，点一下直接开讲</p>
+    </div>
+
+    <div class="sect">
+      <h3>展项目录 · 点击开讲</h3>
+      <div id="exhibitList"></div>
+    </div>
+
+    <div class="sect">
+      <h3>知识库范围</h3>
+      <p id="kbScope">结构化知识覆盖 6 个展项（历史沿革、建筑特征、文化价值、常见问答）；超出范围的问题交给本地千问大模型作答。</p>
+    </div>
+
+    <div class="sect">
+      <h3>内容审核</h3>
+      <p>讲解词与问答全部由本项目撰写、审核，写入主题包后才可被召回；大模型输出经过长度与敏感话题约束，涉及政治、医疗建议等问题转由人工话术兜底。<b>不回答实时信息</b>（天气、新闻、行情、比分等），被问到会直接说明查不到，不做猜测。</p>
+    </div>
+
+    <div class="sect">
+      <h3>隐私说明</h3>
+      <p>麦克风音频只经本机回环（127.0.0.1）送到本机的语音识别进程，<b>不出本机、不落盘</b>，识别结束即释放；对话记录保存在本浏览器的会话存储中（刷新保留、关闭标签页自动清空），也可随时用「重置全场」清除。</p>
+    </div>
+  </div>
+</aside>
+
+<!-- 右：问答记录 -->
+<aside class="drawer right hide" id="historyPanel">
+  <div class="head">
+    <h2>问答记录</h2>
+    <div class="sub" id="historyCount">0 条</div>
+  </div>
+  <div class="body" id="historyBody">
+    <div class="empty">还没有对话。<br>问一句「介绍一下碉楼」试试。</div>
+  </div>
+</aside>
+
+<!-- 演示模式 -->
+<div class="demo" id="demoBox">
+  <div class="bar" id="demoBar"></div>
+  <div class="idx" id="demoIdx">STEP 1 / 6</div>
+  <div class="title" id="demoTitle">说明问题</div>
+  <div class="dur" id="demoDur">30 秒</div>
+  <ul id="demoPoints"></ul>
+  <div class="row">
+    <button id="demoPrev">上一步</button>
+    <button id="demoNext" class="primary">下一步</button>
+    <button id="demoReset">重置</button>
+  </div>
+</div>
+
+<!-- 底部 -->
+<div class="stage">
+  <div class="subtitle" id="subtitle" aria-live="polite"></div>
+  <div class="quick" id="quickAsk"></div>
+  <div class="controls">
+    <button id="btnStop" disabled>停止播报</button>
+    <button id="btnReplay" disabled>重播</button>
+    <div class="sep"></div>
+    <button id="btnHistory">问答记录</button>
+    <button id="btnClear" title="清空对话并复位（快捷键 R）">重置全场</button>
+  </div>
+  <div class="shots" id="shots"></div>
+  <div class="composer">
+    <input id="shotPick" type="file" accept="image/*" multiple hidden />
+    <input id="textInput" placeholder="问问小侨，或按住说话" autocomplete="off" />
+    <div class="foot">
+      <button class="tool" id="shotBtn" type="button" aria-label="添加图片"
+        data-tip="看图识物：选一张图，或直接把图拖进窗口">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="18" height="14" rx="2"/><circle cx="12" cy="13" r="4"/><path d="M8 6l1.5-2h5L16 6"/></svg>
+      </button>
+      <button class="tool mic" id="mic" type="button" aria-label="按住说话，松开发送"
+        data-tip="按住说话：松开后自动识别并发送">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3z"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/></svg>
+      </button>
+      <span class="hint">Enter 发送</span>
+      <button class="send" id="btnSend" aria-label="发送">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5"/><path d="M5 12l7-7 7 7"/></svg>
+      </button>
+    </div>
+  </div>
+</div>
+
+<div class="drop-hint" id="dropHint"><div class="box">松手，小侨看图回答 · 最多 3 张</div></div>
+
+<div class="errbar" id="errbar" role="alert">
+  <span id="errText"></span>
+  <button id="errRetry">重试</button>
+  <button id="errClose" aria-label="关闭提示">×</button>
+</div>
+<div class="banner" id="banner"></div>
+
+<!-- 弹层 -->
+<div class="modal" id="modal" role="dialog" aria-modal="true" aria-labelledby="sheetTitle">
+  <div class="sheet">
+    <div class="top">
+      <h2 id="sheetTitle">技术架构</h2>
+      <button class="x" id="sheetClose" type="button" aria-label="关闭">×</button>
+    </div>
+
+    <div id="techPane" class="panes" style="display:none">
+      <div class="arch">
+        <div class="layer"><div class="k">展示层</div><div class="v">Three.js r187 + VRM 1.0 数字人 <em>· 程序化展台 · 无构建、纯本地 vendor</em></div></div>
+        <div class="layer"><div class="k">交互层</div><div class="v">WebSocket 流式语音识别 <em>· 按住即说、松手出字 · 支持文字输入与字幕同步</em></div></div>
+        <div class="layer main"><div class="k">认知层</div><div class="v">展项知识库（规则召回）+ <span id="mLlmTech">本地千问</span> <em>· 命中走结构化答案，未命中才交大模型；重要史实不让模型自由发挥</em></div></div>
+        <div class="layer"><div class="k">语音层</div><div class="v">Piper 离线神经网络合成 <em>· 逐句生成口型轨道，与 3D 表情、手势同步</em></div></div>
+      </div>
+      <div class="mgrid">
+        <div class="mcell big">
+          <b id="mResp">—</b>
+          <span id="mRespNote">端到端响应（提问→出声）</span>
+          <em>同一句话第二次问会命中语音缓存，几十毫秒就出声——页面照实标注，不改成好看的整数</em>
+          <div class="mline">本地大模型 <b id="mLlm">—</b><i>·</i>资源本地化 <b id="mOff">100%</b></div>
+        </div>
+        <div class="mcell"><b id="mKb">—</b><span>知识条目</span></div>
+        <div class="mcell"><b id="mAsr">—</b><span>识别模型加载</span></div>
+        <div class="mcell"><b id="mTts">—</b><span>合成模型加载</span></div>
+      </div>
+      <div class="cards two">
+        <div class="card wide">
+          <h4>离线部署与响应策略</h4>
+          <p>Three.js、VRM、识别与合成模型、千问权重全部在本机目录，页面不引用任何 CDN，断网后仍可完整演示。识别用流式模型边说边出字，松手后用离线模型复核；合成逐句返回，首句出声前不等整段。</p>
+        </div>
+        <div class="card"><h4>视觉与口型</h4><p>口型由音频能量与音节时间轴驱动（按拼音韵腹归到 5 个基本口型），不是逐字动画；讲解时镜头推近对应展台，人物转身面向展品。</p></div>
+        <div class="card"><h4>可复制性</h4><p>主题包是一个 JSON：换展品、模型、讲解词即可换个馆用，代码不动。这也是我们敢报文旅场景的原因。</p></div>
+      </div>
+    </div>
+
+    <div id="reviewPane" class="panes" style="display:none">
+      <div class="tabs" id="reviewTabs">
+        <button data-tab="value" class="on">应用价值</button>
+        <button data-tab="inno">创新创意</button>
+        <button data-tab="team">团队分工</button>
+        <button data-tab="law">合规与产权</button>
+      </div>
+
+      <div class="pane on" data-pane="value" style="margin-top:18px">
+        <div class="cards two">
+          <div class="card wide">
+            <h4>为什么景区用得上</h4>
+            <p>旺季讲解员排不过来，一队人挤在碉楼底下听不清；办个临时展，讲解词要重写一遍；游客随口问一句「这楼为什么这么高」，讲解员不一定答得上——这三件事在侨乡的故居和展馆里都真实存在。</p>
+            <p style="margin-top:8px">我们的做法是把它做成一台普通电脑就能跑的东西：讲解词写进主题包，换展只改文件；游客怎么问都能接，接不上就老实说不知道。</p>
+          </div>
+          <div class="card"><h4>成本</h4><p>整套在本机运行，没有云服务费、没有按次调用费。设备就是一台带显卡的笔记本。</p></div>
+          <div class="card"><h4>维护</h4><p>讲解词、问答、模型文件名都放在主题包里，改一行就生效，不用重新打包前端。</p></div>
+        </div>
+        <div class="cards" style="grid-template-columns:1fr;margin-top:12px">
+          <div class="card">
+            <h4>准备怎么用</h4>
+            <p>近期先在学校实训展厅试：把六个展项串成一条参观动线，学生轮班当讲解员，AI 在旁边补位，顺便收集真实提问来补问答库。景区那边要先把讲解词按他们的口径过一遍，再谈部署。</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="pane" data-pane="inno" style="margin-top:18px">
+        <div class="cards two">
+          <div class="card wide">
+            <h4>方言地名纠错<span>五邑地名表</span></h4>
+            <p>粤语口音下「台山 / 开平 / 新会 / 茶坑 / 赤坎 / 天马」常被识别成同音字，我们把地名、展项别名做进对照表，识别结果先纠正再检索，避免"问对了却查不到"。</p>
+            <p style="margin-top:10px;color:#8c8676;font-size:11px;line-height:2">
+              台山 · 开平 · 新会 · 茶坑 · 赤坎 · 天马<br>
+              碉楼 / 瑞石楼 / 自力村 · 骑楼 / 小广州<br>
+              银信 / 批局 · 古榕 / 鸟的天堂
+            </p>
+            <p style="margin-top:12px;padding-top:12px;border-top:1px solid rgba(255,255,255,.07)">
+              <span style="color:#d9a85f;letter-spacing:.12em;font-size:11px">一景区一主题包 · 零代码换展</span><br>
+              展品、模型、讲解词、问答全部外置为 JSON，新增展项只加配置不动代码，具备批量复制到其他景区的条件。
+            </p>
+          </div>
+          <div class="card"><h4>双通道知识</h4><p>展项知识保证史实准确、口径统一；未覆盖的问题交给本地千问，避免大模型编造文物细节。</p></div>
+          <div class="card"><h4>展项驱动的讲解表演</h4><p>镜头推进、转身、手势、情绪由展品与语音时间轴共同驱动，讲解不是念稿。</p></div>
+        </div>
+      </div>
+
+      <div class="pane" data-pane="team" style="margin-top:18px">
+        <div class="cards">
+          <div class="card"><h4>建模与场景</h4><p>Maya 建模各展品（碉楼、骑楼街、故居、陈皮、侨批、古榕），导出 GLB 并控制面数与尺寸规范；负责场景布光与配色。</p></div>
+          <div class="card"><h4>算法与后端</h4><p>语音识别/合成链路、知识库与检索、大模型接入、服务与接口、离线打包与自检脚本。</p></div>
+          <div class="card"><h4>讲解词与演示</h4><p>史料核对与讲解词撰写、问答库整理、现场演示脚本与话术、答辩材料与知识产权清单。</p></div>
+          <div class="card"><h4>应急分工</h4><p>一人操作、一人讲解、一人盯状态；断网或异常时立即切到本地录屏与静态降级页，保证演示不中断。</p></div>
+        </div>
+      </div>
+
+      <div class="pane" data-pane="law" style="margin-top:18px">
+        <div class="cards" style="grid-template-columns:1fr">
+          <div class="card">
+            <h4>开源组件清单</h4>
+            <table class="tbl">
+              <tr><th>组件</th><th>用途</th><th>许可证</th></tr>
+              <tr><td>Three.js</td><td>3D 渲染</td><td>MIT</td></tr>
+              <tr><td>@pixiv/three-vrm</td><td>VRM 数字人</td><td>MIT</td></tr>
+              <tr><td>sherpa-onnx</td><td>离线语音识别</td><td>Apache-2.0</td></tr>
+              <tr><td>Piper</td><td>离线语音合成</td><td>MIT</td></tr>
+              <tr><td>Ollama / Qwen</td><td>本地大模型</td><td>MIT / Apache-2.0</td></tr>
+              <tr><td>FastAPI</td><td>本地服务</td><td>MIT</td></tr>
+            </table>
+          </div>
+          <div class="card">
+            <h4>素材与数据</h4>
+            <p>展品模型由团队成员使用 Maya 原创建模；讲解词依据公开史料撰写并人工核对；未使用他人图片、音频与字体素材。数字人模型使用可再分发的 VRM 资源，仅用于本作品演示。</p>
+          </div>
+          <div class="card">
+            <h4>隐私与安全</h4>
+            <p>录音只经本机回环（127.0.0.1）送入本机识别进程，识别完成后立即释放，不写入磁盘、不上传互联网；对话记录保存在本浏览器的会话存储中，关闭标签页即清空，不出本机。演示前会提示录音状态，麦克风权限可随时在浏览器撤销。开源许可证与素材授权清单见随作品提交的 <b>LICENSES.md</b>。</p>
+          </div>
+          <div class="card limits">
+            <h4>已知限制（下一版要解决的）</h4>
+            <p>· 口型是音频能量驱动，不是音素级对口型，凑近看能看出不同字的口型差别不大；<br>
+               · 方言纠错表只覆盖 6 个地名，粤语重口音下识别率会掉，现场尽量用普通话；<br>
+               · 数字人用的是可再分发的第三方 VRM 模型，形象不是我们原创；<br>
+               · 知识库以外的问题交给千问，偶尔会说错，所以重要史实一律走结构化答案。</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="checkPane" class="panes" style="display:none">
+      <p style="font-size:11.5px;color:var(--faint);letter-spacing:.08em;margin-bottom:6px">演示前自检 · 每次刷新自动执行，也可手动重跑</p>
+      <div id="checkList"></div>
+      <div style="margin-top:16px"><button class="send" id="btnRecheck">重新检测</button></div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast" aria-live="polite"></div>
+<div class="loading" id="loading">正在唤醒讲解员<div class="tip" id="loadTip">加载 3D 场景与语音模型…</div></div>
+
+<script type="module" src="/src/main.js"></script>
+</body>
+</html>
