@@ -239,7 +239,7 @@ class Guide:
     def info(self):
         t = self.theme or {}
         name = t.get("name", self.theme_id or "")
-        return {
+        info = {
             "id": self.theme_id,
             "name": name,
             "short": t.get("short", name),
@@ -261,6 +261,13 @@ class Guide:
                 for e in t.get("exhibits", [])
             ],
         }
+        # 主题包可选字段：开场白与「展品 → 情绪/手势」风格表。
+        # 只在存在时下发；缺省时前端仍用内置默认值，换展不必改代码。
+        if t.get("welcome"):
+            info["welcome"] = t["welcome"]
+        if t.get("exhibit_styles"):
+            info["exhibit_styles"] = t["exhibit_styles"]
+        return info
 
     def exhibit(self, exc_id):
         for e in self.theme.get("exhibits", []):

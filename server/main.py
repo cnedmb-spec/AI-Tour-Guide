@@ -40,6 +40,12 @@ def _tunnel_origin() -> str:
 
 def _start_warmup():
     def run():
+        try:
+            removed = tts.cleanup_cache()
+            if removed:
+                print("tts cache cleaned:", removed)
+        except Exception as exc:
+            print("tts cache cleanup failed:", exc)
         t = time.time()
         asr.warmup()
         _metrics["asr_load_ms"] = int((time.time() - t) * 1000)

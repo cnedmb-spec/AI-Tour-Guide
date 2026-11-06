@@ -119,7 +119,11 @@ let avatar = NOOP_AVATAR;
 if (webglReady()) {
   try {
     world = createWorld(canvas, theme, models);
-    avatar = new Avatar(world.scene, world.camera);
+    // 主题包驱动讲解员：胸牌名与「展品 → 情绪/手势」风格表都不再写死在 avatar.js
+    avatar = new Avatar(world.scene, world.camera, {
+      assistantName: theme.assistant && theme.assistant.name,
+      exhibitStyles: theme.exhibit_styles,
+    });
   } catch (e) {
     console.error('3D 场景初始化失败，已降级：', e);
     world = NOOP_WORLD;
@@ -419,13 +423,16 @@ async function runAsk(text, images) {
     avatar.faceTowards(p.pos);
     avatar.lookAtPoint(p.pos);
     avatar.setExplainTarget(p.pos, res.exhibit);
+    // 风格表给的是「展品默认性格」；后端明确判出的强情绪（欢迎、赞叹等）优先
+    if (res.emotion && res.emotion !== 'neutral') avatar.setEmotion(res.emotion);
   } else {
     world.resetCamera();
     avatar.resetFacing();
     avatar.lookAtPoint({ x: 0, y: 1.55, z: 3.6 });
+    // 后端返回的 emotion 此前一直没被消费，欢迎/闲聊/兜底的表情其实没生效
+    avatar.setEmotion(res.emotion || 'neutral');
+    avatar.setGesture(res.gesture, 2.2);
   }
-
-  if (!res.exhibit) avatar.setGesture(res.gesture, 2.2);
   avatar.setSpeaking(true);
   speaking = true;
   ui.setStatus('讲解中', 'speak');

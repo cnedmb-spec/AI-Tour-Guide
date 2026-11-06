@@ -143,8 +143,16 @@ export function createUI({ theme, themeList, guide, handlers }) {
   function partial(text) {
     if (!text) return;
     clearInterval(typeTimer);
-    $('subtitle').innerHTML = `<span class="who">正在识别</span><span class="line">${escapeHtml(text)}</span>`;
-    $('subtitle').classList.add('show');
+    // 识别文本来自麦克风，属于不可信输入：用 textContent 组装，不拼 innerHTML
+    const el = $('subtitle');
+    const who = document.createElement('span');
+    const line = document.createElement('span');
+    who.className = 'who';
+    who.textContent = '正在识别';
+    line.className = 'line';
+    line.textContent = text;
+    el.replaceChildren(who, line);
+    el.classList.add('show');
   }
 
   // ─────────── 问答记录 ───────────

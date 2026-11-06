@@ -28,7 +28,7 @@ For j = 0 To UBound(lines)
   End If
 Next
 If py = "" Then
-  cand = "C:\Users\ghhjhjh\AppData\Local\Programs\Python\Python311\python.exe"
+  cand = sh.ExpandEnvironmentStrings("%LOCALAPPDATA%") & "\Programs\Python\Python311\python.exe"
   If fso.FileExists(cand) Then py = cand
 End If
 If py = "" Then
@@ -51,7 +51,7 @@ If PortInUse(8765) Then
 End If
 
 ' ---- local LLM (tray app, keep quiet); skip silently if not installed ----
-ollama = "C:\Users\ghhjhjh\AppData\Local\Programs\Ollama\ollama app.exe"
+ollama = sh.ExpandEnvironmentStrings("%LOCALAPPDATA%") & "\Programs\Ollama\ollama app.exe"
 If fso.FileExists(ollama) Then sh.Run """" & ollama & """", 1, False
 
 ' ---- guide server: hidden, detached, log to file ----

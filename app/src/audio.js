@@ -105,7 +105,6 @@ export class Mic {
     this.node = null;
     this.src = null;
     this.ws = null;
-    this.onLevel = null;
     this.onText = null;
     this.stopped = false;
   }
@@ -149,10 +148,6 @@ export class Mic {
     const ratio = this.ctx.sampleRate / 16000;
     this.node.onaudioprocess = (e) => {
       const input = e.inputBuffer.getChannelData(0);
-      let peak = 0;
-      for (let i = 0; i < input.length; i++) peak = Math.max(peak, Math.abs(input[i]));
-      if (this.onLevel) this.onLevel(peak);
-
       const outLen = Math.floor(input.length / ratio);
       const out = new Float32Array(outLen);
       for (let i = 0; i < outLen; i++) {

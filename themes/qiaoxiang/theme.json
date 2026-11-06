@@ -20,6 +20,14 @@
   "route": "先走赤坎的骑楼街，再看开平的碉楼，午后回新会：梁启超故居、小鸟天堂，最后喝一杯陈皮水。这一天走下来，侨乡的「走出去」和「寄回来」，就都看全了。",
   "fallback": "这个我一时答不上来。要不我陪您看看碉楼、骑楼街，或者聊一聊陈皮的年份？",
   "realtime": "这类实时信息我查不到——我是本机离线跑的讲解员，没有联网看天气、看新闻。侨乡的事你尽管问，碉楼、骑楼、陈皮、侨批我都熟。",
+  "exhibit_styles": {
+    "diaolou": { "emotion": "serious", "gesture": "point" },
+    "chikan": { "emotion": "happy", "gesture": "hands" },
+    "liang": { "emotion": "relaxed", "gesture": "hands" },
+    "chenpi": { "emotion": "happy", "gesture": "spread" },
+    "qiaopi": { "emotion": "serious", "gesture": "hands" },
+    "bird": { "emotion": "happy", "gesture": "spread" }
+  },
   "exhibits": [
     {
       "id": "diaolou",

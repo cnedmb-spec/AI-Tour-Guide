@@ -16,6 +16,11 @@ dist/
 build/
 *.log
 
+# Rust desktop shell
+desktop/target/
+/QiaoxiangGuide.exe
+/QiaoxiangGuide.exe.WebView2/
+
 # Environment
 .env
 .env.local

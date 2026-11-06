@@ -137,6 +137,39 @@ def _key_lock(key: str) -> threading.Lock:
         return lock
 
 
+def cleanup_cache(max_age_days: float = 7, max_files: int = 600) -> int:
+    """启动时清理长期累积的语音缓存：先删过期文件，再按数量上限淘汰最旧的。
+
+    长期运行下 cache 会无限增长（实测 88 MB+）；删除是安全的——
+    synthesize 发现文件不存在会按 key 加锁重新合成，已读进内存的音频不受影响。
+    """
+    import time
+    now = time.time()
+    removed = 0
+    try:
+        for p in CACHE.glob("*.wav"):
+            try:
+                if now - p.stat().st_mtime > max_age_days * 86400:
+                    p.unlink()
+                    removed += 1
+            except OSError:
+                pass
+        rest = sorted(
+            (p for p in CACHE.glob("*.wav") if p.is_file()),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        for p in rest[max_files:]:
+            try:
+                p.unlink()
+                removed += 1
+            except OSError:
+                pass
+    except OSError:
+        pass
+    return removed
+
+
 def synthesize(text: str):
     """返回 (音频相对路径, 时长, 口型轨道)。同一文本命中缓存。
 

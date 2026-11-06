@@ -707,7 +707,6 @@ export function createWorld(canvas, theme, models = null) {
     lastT = now;
     tAcc += dt;
     dust.rotation.y += dt * 0.01;
-    lights.update(dt);
     let i = 0;
     for (const k in pedestals) {
       const p = pedestals[k];
@@ -800,7 +799,6 @@ function buildLights(scene, theme) {
       s.castShadow = false;
       scene.add(s, s.target);
     },
-    update() {},
   };
 }
 
