@@ -25,6 +25,9 @@ export default defineConfig({
     },
   ],
   build: {
+    // main.js 用了顶层 await，默认 target(es2020) 会在 esbuild 阶段直接报错；
+    // 运行载体是本机现代浏览器 / WebView2，统一按 esnext 产出。
+    target: 'esnext',
     chunkSizeWarningLimit: 4096,
   },
 });

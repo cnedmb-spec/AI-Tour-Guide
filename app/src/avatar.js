@@ -155,42 +155,51 @@ export class Avatar {
     // 讲解员胸牌：做成贴合胸口的曲面小牌，平贴片会在浅色衣服上显出「贴纸」感
     this.chestNode = vrm.humanoid.getNormalizedBoneNode('chest');
     if (this.chestNode) {
+      // 4 倍采样 + 更重的字重 + 更高对比：胸牌在全身镜头里只有几十像素，
+      // 256×176 的贴图连笔画都撑不住（DEF-31）
       const cv = document.createElement('canvas');
-      cv.width = 256; cv.height = 176;
+      cv.width = 1024; cv.height = 704;
       const ctx = cv.getContext('2d');
-      ctx.fillStyle = '#10201f';
-      ctx.fillRect(0, 0, 256, 176);
-      ctx.strokeStyle = '#c8a45e';
-      ctx.lineWidth = 8;
-      ctx.strokeRect(6, 6, 244, 164);
-      ctx.fillStyle = '#e8cf9a';
+      ctx.fillStyle = '#081615';
+      ctx.fillRect(0, 0, 1024, 704);
+      ctx.strokeStyle = '#dcb268';
+      ctx.lineWidth = 28;
+      ctx.strokeRect(24, 24, 976, 656);
+      ctx.fillStyle = '#ffebae';
       ctx.textAlign = 'center';
-      ctx.font = '600 54px "Microsoft YaHei","KaiTi",sans-serif';
-      ctx.fillText('讲解员', 128, 78);
-      ctx.font = '600 42px "Microsoft YaHei",sans-serif';
+      ctx.textBaseline = 'middle';
+      ctx.font = '800 216px "Microsoft YaHei","KaiTi",sans-serif';
+      ctx.fillText('讲解员', 512, 262);
+      ctx.font = '800 168px "Microsoft YaHei",sans-serif';
       // 主题化（DEF-29）：名字取自主题包 assistant.name，换景区不再挂错胸牌
-      ctx.fillText(this.badgeName || '小 侨', 128, 134);
+      ctx.fillText(this.badgeName || '小 侨', 512, 522);
       const badgeTex = new THREE.CanvasTexture(cv);
       badgeTex.colorSpace = THREE.SRGBColorSpace;
-      badgeTex.anisotropy = 8;
+      // 保留 mipmap 抗混叠：胸牌在全景只有二十来像素，关掉会变成锯齿；
+      // 三线性 + 各向异性 16 让远景既平滑又尽量选到清晰层级（DEF-31 回归修正）
+      badgeTex.generateMipmaps = true;
+      badgeTex.minFilter = THREE.LinearMipmapLinearFilter;
+      badgeTex.magFilter = THREE.LinearFilter;
+      badgeTex.anisotropy = 16;
 
       const lanyard = new THREE.Group();
 
-      // 弧面胸牌：半径略大于躯干，牌面贴在衣服表面而不陷进去
+      // 弧面胸牌：半径略大于躯干，牌面贴在衣服表面而不陷进去。
+      // 半径与高度同比放大 25%：屏幕像素不足时，物理放大比调贴图更直接
       const card = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.132, 0.132, 0.055, 22, 1, true, -0.31, 0.62),
+        new THREE.CylinderGeometry(0.165, 0.165, 0.069, 22, 1, true, -0.31, 0.62),
         new THREE.MeshStandardMaterial({
           map: badgeTex, roughness: 0.55, metalness: 0.12, side: THREE.DoubleSide,
         })
       );
       lanyard.add(card);
 
-      // 牌夹：顶端一小条金属卡扣
+      // 牌夹：顶端一小条金属卡扣（位置随牌面放大同步外移）
       const clip = new THREE.Mesh(
         new THREE.BoxGeometry(0.024, 0.006, 0.008),
         new THREE.MeshStandardMaterial({ color: 0xc8a45e, metalness: 0.9, roughness: 0.35 })
       );
-      clip.position.set(0, 0.033, 0.128);
+      clip.position.set(0, 0.041, 0.160);
       lanyard.add(clip);
 
       this.lanyard = lanyard;

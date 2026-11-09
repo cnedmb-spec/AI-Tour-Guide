@@ -48,14 +48,17 @@ export async function preloadModels(theme, opts = {}) {
               if (cfg.metalness !== undefined) m.metalness = cfg.metalness;
               if (cfg.env !== undefined) m.envMapIntensity = cfg.env;
               if (cfg.emissive) { m.emissive.set(cfg.emissive); m.emissiveIntensity = cfg.emissiveIntensity ?? 1; }
-              // 带字的材质（门匾/招牌/铭牌）默认关 mipmap：缩略时不会把笔画平均掉
-              const textLike = /sign|plaque|plate|text|label|board/i.test(m.name || '');
+              // 带字材质保留 mipmap 做低通滤波，改用三线性 + 各向异性 16 选清晰层级。
+              // 曾对这类材质一律关 mipmap：远景里 1024×2206 的侨批信纸被采样成
+              // 一排红色短竖线加黑色噪点，大字招牌也起锯齿（DEF-31 回归修正）。
+              const textLike = /sign|plaque|plate|text|label|board|letter|paper|note|stamp|匾|牌|字|纸/i.test(m.name || '');
               if (cfg.sharp || textLike) {
+                const noMip = !!cfg.sharp;   // 主题包显式指定时才退回无 mipmap 的锐利模式
                 for (const k of ['map', 'normalMap', 'roughnessMap', 'metalnessMap']) {
                   const t = m[k];
                   if (!t) continue;
-                  t.generateMipmaps = false;
-                  t.minFilter = THREE.LinearFilter;
+                  t.generateMipmaps = !noMip;
+                  t.minFilter = noMip ? THREE.LinearFilter : THREE.LinearMipmapLinearFilter;
                   t.magFilter = THREE.LinearFilter;
                   t.anisotropy = 16;
                   t.needsUpdate = true;
@@ -282,6 +285,18 @@ function addArch(parent, w, h, x, y, z, stoneMat, dimMat) {
   return g;
 }
 
+// 带字贴图保留 mipmap（多级渐远纹理）做低通滤波：牌子在远景只有几十像素，
+// 关掉会把密集笔画采样成锯齿与摩尔纹；三线性 + 各向异性 16 兼顾平滑与清晰（DEF-31 回归修正）。
+function textTexture(cv) {
+  const t = new THREE.CanvasTexture(cv);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.generateMipmaps = true;
+  t.minFilter = THREE.LinearMipmapLinearFilter;
+  t.magFilter = THREE.LinearFilter;
+  t.anisotropy = 16;
+  return t;
+}
+
 // 展牌：米白亚光底板 + 深褐刻字（深底金字在展厅暗处会糊成一片，浅底深字才看得清）
 function plateTexture(name, sub) {
   const W = 2048, H = 720;
@@ -311,44 +326,38 @@ function plateTexture(name, sub) {
 
   g.textAlign = 'center';
   g.textBaseline = 'middle';
-  // 展名：字号按字数自适应，四字五字都撑满又不溢出
+  // 展名：字号按字数自适应，四字五字都撑满又不溢出；字重加粗保住笔画
   const n = [...name].length;
   const fs = Math.min(412, Math.floor(1760 / n));
-  g.fillStyle = '#241a10';
-  g.font = `700 ${fs}px "KaiTi","STKaiti","Microsoft YaHei",serif`;
+  g.fillStyle = '#1c1208';
+  g.font = `800 ${fs}px "KaiTi","STKaiti","Microsoft YaHei",serif`;
   g.fillText(name, W / 2, H * 0.47);
 
   if (sub) {
-    g.fillStyle = 'rgba(122,88,42,.92)';
-    g.font = '600 80px "Times New Roman",Georgia,serif';
+    g.fillStyle = '#6b4a20';
+    g.font = '700 96px "Times New Roman",Georgia,serif';
     g.fillText(sub, W / 2, H * 0.855);
   }
-  const t = new THREE.CanvasTexture(cv);
-  t.colorSpace = THREE.SRGBColorSpace;
-  t.anisotropy = 16;
-  return t;
+  return textTexture(cv);
 }
 
-// 骑楼店铺招牌：深色木底 + 金漆字
+// 骑楼店铺招牌：深色木底 + 金漆字（贴图 2 倍采样，招牌在屏幕上很小也保得住笔画）
 function shopSignTexture(text) {
-  const W = 512, H = 128;
+  const W = 1024, H = 256;
   const cv = document.createElement('canvas');
   cv.width = W; cv.height = H;
   const g = cv.getContext('2d');
   g.fillStyle = '#1d1510';
   g.fillRect(0, 0, W, H);
   g.strokeStyle = 'rgba(206,168,96,.9)';
-  g.lineWidth = 5;
-  g.strokeRect(10, 10, W - 20, H - 20);
+  g.lineWidth = 10;
+  g.strokeRect(20, 20, W - 40, H - 40);
   g.textAlign = 'center';
   g.textBaseline = 'middle';
-  g.fillStyle = '#e6c47c';
-  g.font = '700 74px "KaiTi","STKaiti","Microsoft YaHei",serif';
-  g.fillText(text, W / 2, H / 2 + 2);
-  const t = new THREE.CanvasTexture(cv);
-  t.colorSpace = THREE.SRGBColorSpace;
-  t.anisotropy = 8;
-  return t;
+  g.fillStyle = '#f2d28d';
+  g.font = '800 148px "KaiTi","STKaiti","Microsoft YaHei",serif';
+  g.fillText(text, W / 2, H / 2 + 4);
+  return textTexture(cv);
 }
 
 // 干陈皮表面：米黄底 + 密布油胞（小凹点）+ 皱纹，靠材质颜色区分新皮/老皮
@@ -565,7 +574,8 @@ export function createWorld(canvas, theme, models = null) {
   scene.background = new THREE.Color(theme.palette.bg);
   scene.fog = new THREE.FogExp2(theme.palette.fog, 0.042);
 
-  const camera = new THREE.PerspectiveCamera(34, window.innerWidth / window.innerHeight, 0.1, 120);
+  // near 从 0.1 抬到 0.28：镜头贴近模型时不再把面片裁成可直接穿进去的空洞
+  const camera = new THREE.PerspectiveCamera(34, window.innerWidth / window.innerHeight, 0.28, 120);
   camera.position.set(0, 1.5, 6.0);
 
   const pmrem = new THREE.PMREMGenerator(renderer);
@@ -653,7 +663,53 @@ export function createWorld(canvas, theme, models = null) {
   // 相机推拉
   const camBase = { pos: new THREE.Vector3(0, 1.5, 6.0), look: new THREE.Vector3(0, 1.0, -1.2) };
   const camTarget = { pos: camBase.pos.clone(), look: camBase.look.clone() };
+  const camLook = camBase.look.clone();   // 当前视点：与相机位置一起插值，避免视点瞬跳
   let focusId = null;
+  let camAnim = null;
+
+  // 数字人站在场景中央（约 x=0、z=1.15），把它占的 xz 区域设为相机禁入区。
+  // 旧实现把展品特写机位推到 z≈0.9，正好落进这块区域：讲解时人物出画，
+  // 复位时相机又沿直线穿过人物模型（演示录屏 16.9–17.6s 的穿模）。
+  const KEEPOUT = { minX: -1.15, maxX: 1.15, minZ: 0.25, maxZ: 2.1 };
+  // Liang–Barsky 线段-矩形求交（xz 投影）：解析判定、无漏检。
+  // 固定步数采样会漏掉只擦过矩形一角的路径，那正是复位穿模最难查的一类假阴性。
+  function segmentHitsKeepout(a, b) {
+    const dx = b.x - a.x, dz = b.z - a.z;
+    const p = [-dx, dx, -dz, dz];
+    const q = [a.x - KEEPOUT.minX, KEEPOUT.maxX - a.x,
+               a.z - KEEPOUT.minZ, KEEPOUT.maxZ - a.z];
+    let t0 = 0, t1 = 1;
+    for (let i = 0; i < 4; i++) {
+      if (p[i] === 0) {
+        if (q[i] < 0) return false;      // 平行于该边且整段在矩形外
+      } else {
+        const r = q[i] / p[i];
+        if (p[i] < 0) { if (r > t1) return false; if (r > t0) t0 = r; }
+        else { if (r < t0) return false; if (r < t1) t1 = r; }
+      }
+    }
+    return t0 <= t1;
+  }
+  function easeInOutCubic(t) {
+    return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+  }
+  // 所有镜头移动走同一条管线：固定时长缓动 + 同步插值视点；
+  // 直线会穿过中央时改用带侧向控制点的二次贝塞尔，从人物旁边绕过去。
+  function moveCameraTo(pos, look, dur = 0.95) {
+    const from = camera.position.clone();
+    const fromLook = camLook.clone();
+    camTarget.pos.copy(pos);
+    camTarget.look.copy(look);
+    const side = (from.x + pos.x) >= 0 ? 1 : -1;
+    const ctrl = segmentHitsKeepout(from, pos)
+      ? new THREE.Vector3(
+          side * Math.max(2.4, Math.abs(from.x) + 1.4, Math.abs(pos.x) + 1.4),
+          Math.max(from.y, pos.y) + 0.3,
+          (from.z + pos.z) * 0.5
+        )
+      : null;
+    camAnim = { from, fromLook, to: pos.clone(), toLook: look.clone(), ctrl, dur, t: 0 };
+  }
 
   // 按人物真实包围盒取景：身高约占画面 72%，头顶/脚下各留一圈余量
   function frameAvatar(box, ratio = 0.78) {
@@ -665,8 +721,10 @@ export function createWorld(canvas, theme, models = null) {
     camBase.look.set(center.x, center.y + 0.02, center.z);
     camTarget.pos.copy(camBase.pos);
     camTarget.look.copy(camBase.look);
+    camLook.copy(camBase.look);
+    camAnim = null;
     camera.position.copy(camBase.pos);
-    camera.lookAt(camBase.look);
+    camera.lookAt(camLook);
   }
 
   function focusOn(id) {
@@ -674,20 +732,24 @@ export function createWorld(canvas, theme, models = null) {
     const p = pedestals[id];
     if (!p) return;
     // 按展品实际高度反推机位，保证整件展品都进画面（高展品退远、小件推近）
-    const tan = Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2);
     const d = THREE.MathUtils.clamp(p.h * 2.05, 1.8, 4.8);
     const dir = new THREE.Vector3().subVectors(camBase.pos, p.pos);
     dir.y = 0;
+    if (dir.lengthSq() < 1e-6) dir.set(0, 0, 1);
     dir.normalize();
     const lookY = 0.73 + p.h * 0.5;
-    camTarget.pos.copy(p.pos).addScaledVector(dir, d);
-    camTarget.pos.y = lookY + 0.18;
-    camTarget.look.set(p.pos.x, lookY, p.pos.z);
+    const pos = p.pos.clone().addScaledVector(dir, d);
+    // 侧前方取景：横向让开中央的数字人，且机位不越过人物所在的 z 平面。
+    // 这样「推进 → 特写 → 复位」两端都在禁入区外，绕行路径才有效。
+    const side = p.pos.x >= 0 ? 1 : -1;
+    pos.x = side * Math.max(1.6, Math.abs(pos.x));
+    pos.z = Math.min(pos.z, 0.15);
+    pos.y = lookY + 0.18;
+    moveCameraTo(pos, new THREE.Vector3(p.pos.x, lookY, p.pos.z), 0.85);
   }
   function resetCamera() {
     focusId = null;
-    camTarget.pos.copy(camBase.pos);
-    camTarget.look.copy(camBase.look);
+    moveCameraTo(camBase.pos, camBase.look, 1.0);
   }
 
   function resize() {
@@ -717,8 +779,27 @@ export function createWorld(canvas, theme, models = null) {
       p.prop.rotation.y += (sway - p.prop.rotation.y) * Math.min(1, dt * 2);
       i++;
     }
-    camera.position.lerp(camTarget.pos, dt * 2.2);
-    camera.lookAt(camTarget.look);
+    if (camAnim) {
+      const a = camAnim;
+      a.t = Math.min(1, a.t + dt / a.dur);
+      const e = easeInOutCubic(a.t);
+      if (a.ctrl) {
+        const u = 1 - e;
+        camera.position.set(
+          u * u * a.from.x + 2 * u * e * a.ctrl.x + e * e * a.to.x,
+          u * u * a.from.y + 2 * u * e * a.ctrl.y + e * e * a.to.y,
+          u * u * a.from.z + 2 * u * e * a.ctrl.z + e * e * a.to.z
+        );
+      } else {
+        camera.position.lerpVectors(a.from, a.to, e);
+      }
+      camLook.lerpVectors(a.fromLook, a.toLook, e);
+      if (a.t >= 1) camAnim = null;
+    } else {
+      camera.position.lerp(camTarget.pos, dt * 2.2);
+      camLook.lerp(camTarget.look, dt * 2.2);
+    }
+    camera.lookAt(camLook);
     composer.render();
     rafId = requestAnimationFrame(render);
   }
@@ -981,7 +1062,9 @@ function buildPedestal(world, pos, theme, label, topR = 0.44) {
   // 展牌：随基座弧面贴合的曲面牌，比平牌更贴墙、也更像真实展陈
   if (label) {
     const plateTex = plateTexture(label, 'QIAOXIANG · JIANGMEN');
-    const plateW = THREE.MathUtils.clamp(bodyR * 1.78, 0.30, 0.42); // 弧长
+    // 牌面整体放大约 1/3：弧长与高度同比放大，贴图比例不变、文字不变形，
+    // 但远景里每个字能多占一截像素（DEF-31）
+    const plateW = THREE.MathUtils.clamp(bodyR * 2.35, 0.40, 0.56); // 弧长
     const plateH = plateW * 0.36;
     const theta = plateW / bodyR;                                  // 对应圆心角
     const plateGeo = new THREE.CylinderGeometry(
@@ -991,7 +1074,8 @@ function buildPedestal(world, pos, theme, label, topR = 0.44) {
       map: plateTex,
       emissiveMap: plateTex,
       emissive: 0xffffff,
-      emissiveIntensity: 0.42,
+      // 发光贴图会把深褐刻字一起提亮，浅底深字的对比被冲淡；收低到 0.22（DEF-31）
+      emissiveIntensity: 0.22,
       metalness: 0.02,
       roughness: 0.72,
       side: THREE.DoubleSide,
@@ -1358,33 +1442,30 @@ function makeProp(type, palette, name) {
       // 信封：米色信封 + 红框 + 竖写「侨批」+ 邮票，是侨批最典型的样子
       const envelopeTex = (() => {
         const cv = document.createElement('canvas');
-        cv.width = 512; cv.height = 320;
+        cv.width = 1024; cv.height = 640;   // 2 倍采样，信封上的小字才撑得住（DEF-31）
         const c = cv.getContext('2d');
-        c.fillStyle = '#efe3c6'; c.fillRect(0, 0, 512, 320);
+        c.fillStyle = '#efe3c6'; c.fillRect(0, 0, 1024, 640);
         for (let i = 0; i < 60; i++) {
           c.fillStyle = `rgba(150,124,84,${Math.random() * 0.06})`;
-          c.fillRect(Math.random() * 512, Math.random() * 320, 40, 3);
+          c.fillRect(Math.random() * 1024, Math.random() * 640, 80, 6);
         }
-        c.strokeStyle = '#a8332a'; c.lineWidth = 9;
-        c.strokeRect(16, 16, 480, 288);
+        c.strokeStyle = '#a8332a'; c.lineWidth = 18;
+        c.strokeRect(32, 32, 960, 576);
         c.fillStyle = '#8f2a22';
-        c.font = '700 92px "KaiTi","STKaiti",serif';
+        c.font = '800 184px "KaiTi","STKaiti",serif';
         c.textAlign = 'center'; c.textBaseline = 'middle';
-        c.fillText('侨', 356, 92);
-        c.fillText('批', 356, 196);
-        c.fillStyle = '#3a2c1c';
-        c.font = '600 40px "KaiTi","STKaiti",serif';
-        c.fillText('外付银', 150, 110);
-        c.fillText('伍拾圆', 150, 168);
+        c.fillText('侨', 712, 184);
+        c.fillText('批', 712, 392);
+        c.fillStyle = '#2e2011';
+        c.font = '700 80px "KaiTi","STKaiti",serif';
+        c.fillText('外付银', 300, 220);
+        c.fillText('伍拾圆', 300, 336);
         c.fillStyle = '#9c2b23';
-        c.fillRect(60, 232, 96, 56);
+        c.fillRect(120, 464, 192, 112);
         c.fillStyle = '#f4ead4';
-        c.font = '700 34px "KaiTi",serif';
-        c.fillText('批局', 108, 261);
-        const t = new THREE.CanvasTexture(cv);
-        t.colorSpace = THREE.SRGBColorSpace;
-        t.anisotropy = 8;
-        return t;
+        c.font = '800 68px "KaiTi",serif';
+        c.fillText('批局', 216, 522);
+        return textTexture(cv);
       })();
       const envelope = box(0.30, 0.19, 0.008, new THREE.MeshStandardMaterial({
         map: envelopeTex, roughness: 0.9, metalness: 0,

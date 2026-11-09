@@ -49,6 +49,7 @@ let lastImages = [];
 let pendingQuestion = '';
 let lastAskAt = 0;
 let lastNudgeAt = 0;
+let rateCooldownUntil = 0;   // 命中后端 429 后的本地冷却截止时间戳（DEF-30）
 
 // ─────────── 加载主题与展品 ───────────
 $('loadTip').textContent = '加载主题…';
@@ -325,6 +326,15 @@ function ask(text, retryImages, opts = {}) {
   const trayHas = shots.has();
   if (!text && !trayHas && !(retryImages && retryImages.length)) return false;
   const now = performance.now();
+  // 命中限流后的冷却期：连「重试」也不再发请求，否则只会再吃一个 429（DEF-30）
+  const cooldownLeft = Math.ceil((rateCooldownUntil - Date.now()) / 1000);
+  if (cooldownLeft > 0) {
+    if (now - lastNudgeAt > 1200) {
+      lastNudgeAt = now;
+      ui.toast(`提问太频繁，请等 ${cooldownLeft} 秒`);
+    }
+    return false;
+  }
   if (!opts.force && now - lastAskAt < 400) {
     if (now - lastNudgeAt > 1200) {
       lastNudgeAt = now;
@@ -373,19 +383,45 @@ async function runAsk(text, images) {
       body: JSON.stringify({ text, exhibit: currentExhibit, images, session: SID }),
       signal: ctrl.signal,
     });
-    if (!r.ok) throw new Error('HTTP ' + r.status);
+    // 限流是「服务正常但拒绝受理」，不能报成连接失败；
+    // 冷却期内连重试按钮也不发请求，否则只会继续 429（DEF-30）
+    if (r.status === 429) {
+      let wait = Number(r.headers.get('Retry-After')) || 0;
+      let detail = '';
+      try {
+        const info = await r.json();
+        detail = info.error || '';
+        if (!wait) wait = Number(info.retry_after) || 0;
+      } catch (_) { /* 响应体非 JSON 时用响应头 */ }
+      if (!wait || wait < 1) wait = 5;
+      rateCooldownUntil = Date.now() + wait * 1000;
+      if (seq === askSeq) {
+        pendingQuestion = '';
+        ui.setStatus('提问过于频繁', 'err');
+        ui.showError(`提问太频繁，约 ${wait} 秒后可继续${detail ? '（' + detail + '）' : ''}`, null);
+        setTimeout(() => { if (seq === askSeq) ui.hideError(); }, wait * 1000);
+      }
+      return;
+    }
+    if (!r.ok) {
+      let detail = '';
+      try { detail = (await r.json()).error || ''; } catch (_) { /* 忽略 */ }
+      throw new Error(`HTTP ${r.status}${detail ? ' ' + detail : ''}`);
+    }
     res = await r.json();
   } catch (e) {
     if (seq === askSeq) {
       pendingQuestion = '';
       const timeout = e && (e.name === 'AbortError' || e === 'timeout');
-      ui.setStatus('服务未响应', 'err');
-      ui.showError(
-        timeout
-          ? (images.length ? '看图回答 70 秒未完成（视觉模型可能还在加载）' : '本地服务 70 秒未响应（大模型或语音合成可能卡住）')
-          : '本地服务连接失败',
-        () => ask(lastQuestion, lastImages, { force: true }),
-      );
+      const msg = String((e && e.message) || e);
+      // 只有网络层取不到响应才叫「连接失败」；HTTP 4xx/5xx 是服务已响应但拒绝或出错
+      const netFail = e instanceof TypeError || /Failed to fetch|NetworkError|Load failed/i.test(msg);
+      const label = timeout ? '服务未响应' : (netFail ? '服务未响应' : '服务返回异常');
+      const errText = timeout
+        ? (images.length ? '看图回答 70 秒未完成（视觉模型可能还在加载）' : '本地服务 70 秒未响应（大模型或语音合成可能卡住）')
+        : (netFail ? '本地服务连接失败' : `本地服务返回异常（${msg}）`);
+      ui.setStatus(label, 'err');
+      ui.showError(errText, () => ask(lastQuestion, lastImages, { force: true }));
     }
     return;
   } finally {
@@ -465,6 +501,8 @@ async function runAsk(text, images) {
     ui.toast('语音合成失败，已显示字幕', 'error');
   }
   if (seq !== askSeq) return;   // 播到一半被新问题打断
+  // 音频真实结束（或解码失败）时对齐字幕；被打断时已由 stopSpeaking 清屏并在上面返回
+  ui.finishSubtitle();
 
   speaking = false;
   avatar.stopSpeaking();
@@ -473,13 +511,16 @@ async function runAsk(text, images) {
   ui.setStatus('待机');
   ui.setPlaying(false);
 
+  // 语音结束后尽快把镜头拉回全景：原来延后 1800ms 会留下约 2 秒空场，
+  // 且复位为直线插值、会穿过中央的数字人。现在配合 scene.js 的绕行运镜，
+  // 只留 350ms 让尾音收干净。
   setTimeout(() => {
     if (speaking) return;
     world.resetCamera();
     avatar.resetFacing();
     avatar.lookAtPoint({ x: 0, y: 1.55, z: 3.6 });
     avatar.clearExplainTarget();
-  }, 1800);
+  }, 350);
 }
 
 function stopSpeaking() {

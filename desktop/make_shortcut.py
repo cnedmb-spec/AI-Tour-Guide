@@ -13,7 +13,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 TARGET = ROOT / "QiaoxiangGuide.exe"
-ICON = ROOT / "desktop" / "assets" / "guide.ico"
+ICON = ROOT / "brand" / "logo.ico"
 DESKTOP = Path.home() / "Desktop"
 NAME = sys.argv[1] if len(sys.argv) > 1 else "侨乡AI讲解员"
 

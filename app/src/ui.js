@@ -114,15 +114,19 @@ export function createUI({ theme, themeList, guide, handlers }) {
   }
 
   let typeTimer = null;
+  let subtitleText = '';
   function showSubtitle(text, who = theme.assistant.name, duration = 0) {
     if (!text) return;
+    subtitleText = text;
     const el = $('subtitle');
     el.innerHTML = `<span class="who"></span><span class="line"></span><span class="cursor"></span>`;
     el.querySelector('.who').textContent = who || '';
     el.classList.add('show');
     const line = el.querySelector('.line');
     const cur = el.querySelector('.cursor');
-    const total = Math.max(900, (duration || 6) * 1000 * 0.9);
+    // 后端 duration 由 wav 帧数算出，与播放侧实际音频长度可能有偏差；
+    // 逐字速度按整段时长铺满，语音真正结束时再由 finishSubtitle() 补齐残句。
+    const total = Math.max(900, (duration || 6) * 1000);
     const step = total / Math.max(1, text.length);
     let i = 0;
     clearInterval(typeTimer);
@@ -134,7 +138,19 @@ export function createUI({ theme, themeList, guide, handlers }) {
       }
     }, step);
   }
+  // 音频播完（或合成失败）时把字幕补成全文，避免「字已打完还在讲」
+  // 或「讲完了字还没打完」；被打断时 clearSubtitle 已清空 subtitleText。
+  function finishSubtitle() {
+    if (!subtitleText) return;
+    clearInterval(typeTimer);
+    const el = $('subtitle');
+    const line = el.querySelector('.line');
+    const cur = el.querySelector('.cursor');
+    if (line) line.textContent = subtitleText;
+    if (cur) cur.remove();
+  }
   function clearSubtitle() {
+    subtitleText = '';
     clearInterval(typeTimer);
     const el = $('subtitle');
     el.classList.remove('show');
@@ -713,7 +729,7 @@ export function createUI({ theme, themeList, guide, handlers }) {
   bind();
   return {
     ...ui,
-    setStatus, showSubtitle, clearSubtitle, partial,
+    setStatus, showSubtitle, finishSubtitle, clearSubtitle, partial,
     pushQA, pushCancelled, clearHistory, renderHistory,
     setElapsed, resetMetrics, loadStats,
     openSheet, closeSheet, toast, showError, hideError, showBanner,

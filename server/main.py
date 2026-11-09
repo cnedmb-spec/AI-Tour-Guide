@@ -192,6 +192,9 @@ _IMAGE_COUNT_MAX = int(os.environ.get("GUIDE_IMAGE_COUNT_MAX", "3"))
 _IMAGE_CHARS_MAX = int(os.environ.get("GUIDE_IMAGE_CHARS_MAX", "2500000"))
 _RATE_LIMIT = int(os.environ.get("GUIDE_RATE_LIMIT", "20"))
 _RATE_WINDOW = float(os.environ.get("GUIDE_RATE_WINDOW", "60"))
+# 本机直连（请求不带 X-Forwarded-For）是演示与日常使用通道，连点十几下不该被
+# 公网防护阈值拦住；经隧道/代理进来的 pub: 请求仍按 _RATE_LIMIT 严格限流。
+_LOCAL_RATE_LIMIT = int(os.environ.get("GUIDE_LOCAL_RATE_LIMIT", "60"))
 _rate_lock = threading.Lock()
 _rate_hits: dict = {}
 
@@ -203,23 +206,42 @@ def _client_key(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
 
+def _rate_limit_for(key: str) -> int:
+    return _RATE_LIMIT if key.startswith("pub:") else max(_RATE_LIMIT, _LOCAL_RATE_LIMIT)
+
+
 def _rate_ok(key: str) -> bool:
     now = time.time()
     with _rate_lock:
         dq = _rate_hits.setdefault(key, collections.deque())
         while dq and now - dq[0] > _RATE_WINDOW:
             dq.popleft()
-        if len(dq) >= _RATE_LIMIT:
+        if len(dq) >= _rate_limit_for(key):
             return False
         dq.append(now)
         return True
 
 
+def _retry_after(key: str) -> int:
+    """限流窗口内还需等待的秒数：取该客户端最早一次命中的剩余时间。"""
+    with _rate_lock:
+        dq = _rate_hits.get(key)
+        if not dq:
+            return 1
+        return max(1, int(_RATE_WINDOW - (time.time() - dq[0])) + 1)
+
+
 @app.post("/api/ask")
 def ask(body: AskBody, request: Request):
     t0 = time.time()
-    if not _rate_ok(_client_key(request)):
-        return JSONResponse({"error": "请求过于频繁，请稍后再试"}, status_code=429)
+    key = _client_key(request)
+    if not _rate_ok(key):
+        wait = _retry_after(key)
+        return JSONResponse(
+            {"error": f"请求过于频繁，请约 {wait} 秒后再试", "retry_after": wait},
+            status_code=429,
+            headers={"Retry-After": str(wait)},
+        )
     if len(body.text) > _TEXT_MAX:
         return JSONResponse({"error": f"问题过长（上限 {_TEXT_MAX} 字）"}, status_code=413)
     if len(body.images) > _IMAGE_COUNT_MAX or any(len(im) > _IMAGE_CHARS_MAX for im in body.images):

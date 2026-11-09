@@ -106,9 +106,10 @@
   /* ─────────── 底部舞台 ─────────── */
   .stage{position:fixed;left:50%;bottom:calc(26px + var(--kb,0px));transform:translateX(-50%);width:min(880px,64vw);
     z-index:7;display:flex;flex-direction:column;align-items:center;gap:12px}
-  /* 底部压暗一层，字幕压在亮墙上也读得清 */
-  .stage::before{content:"";position:fixed;left:0;right:0;bottom:0;height:250px;z-index:-1;
-    background:linear-gradient(to top,rgba(4,6,9,.78),rgba(4,6,9,.3) 52%,transparent);pointer-events:none}
+  /* 底部压暗一层，字幕压在亮墙上也读得清；镜头推近展品时浅色模型会顶到字幕区，
+     遮罩抬高并加深中段（原 250px / .78 / .3），保证特写态仍有足够对比度 */
+  .stage::before{content:"";position:fixed;left:0;right:0;bottom:0;height:320px;z-index:-1;
+    background:linear-gradient(to top,rgba(4,6,9,.86),rgba(4,6,9,.46) 52%,transparent);pointer-events:none}
   .subtitle{width:100%;text-align:center;font-size:clamp(16px,1.15vw,25px);line-height:1.85;letter-spacing:.03em;
     text-shadow:0 2px 18px rgba(0,0,0,.92);opacity:0;transform:translateY(9px);min-height:0;
     transition:opacity .32s cubic-bezier(.22,.8,.24,1),transform .42s cubic-bezier(.2,.9,.3,1.14)}
