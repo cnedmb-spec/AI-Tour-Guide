@@ -1,0 +1,27 @@
+[workspace]
+resolver = "2"
+members = ["crates/qx-core", "crates/qx-desktop", "crates/qx-bevy"]
+
+[workspace.package]
+edition = "2024"
+license = "MIT OR Apache-2.0"
+
+# qx-core：架构无关核心层（主题包 / 六级路由 / Ollama 客户端 / 相机路径 / 离线知识库）。
+# qx-desktop：主交付 —— 用 gpui-kit 原生窗口 + WebView2 视图渲染【原封不动】的 web/ 页面
+#           （Three.js + VRM 数字人 + 聊天 UI），画面与网页版一模一样。web/ 与 themes/
+#           编译期打进 exe（build.rs 打包），运行时释放到临时目录，单个 exe 自包含、不依赖 Python。
+# qx-bevy：备用方案 —— 若未来要求零 WebView2 的纯原生 3D（Bevy 0.20.1 重画），以此为基线。
+
+[profile.dev]
+debug = 1
+
+[profile.dev.package."*"]
+debug = 0
+
+# release 用轻量优化，缩短依赖树的编译时间并减小 exe 体积
+[profile.release]
+opt-level = 1
+codegen-units = 16
+lto = false
+strip = true
+

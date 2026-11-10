@@ -1,0 +1,25 @@
+[package]
+name = "qx-bevy"
+version = "0.1.0"
+edition.workspace = true
+description = "Qiaoxiang AI Tour Guide - Bevy 0.20.1 native 3D exhibition hall"
+
+[dependencies]
+# 0.20.1 的 3d 特性已展开 default_app / default_platform / bevy_gltf /
+# bevy_pbr / bevy_winit / default_font，无需再显式列出。禁掉默认的 2d 与 audio，
+# 只保留展厅需要的 3D + UI 渲染链，显著缩短首次编译时间。
+bevy = { version = "=0.20.1", default-features = false, features = [
+  "3d",
+  "ui",
+  "png",
+  "jpeg",
+  # 中文属于复杂脚本，不开这个特性 Bevy 0.20 会每帧刷
+  # "ICU4X data error: No segmentation model for Chinese/Japanese"
+  "complex_script_segmentation",
+  # 0.20 起 GLB 场景用 WorldAssetRoot 加载，需开启此特性（同时注入
+  # WorldSerializationPlugin，注册 WorldAsset 加载器）。
+  "bevy_world_serialization",
+] }
+qx-core = { path = "../qx-core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

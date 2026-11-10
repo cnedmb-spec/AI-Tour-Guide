@@ -18,8 +18,16 @@ build/
 
 # Rust desktop shell
 desktop/target/
+rust-rewrite/target/
+rust-rewrite/tts-cache/
 /QiaoxiangGuide.exe
 /QiaoxiangGuide.exe.WebView2/
+
+# Diagnostics / throwaway verification artifacts (not part of the source)
+.diag/
+
+# Redundant self-archive of the project
+rust-rewrite/rust-rewrite.rar
 
 # Environment
 .env

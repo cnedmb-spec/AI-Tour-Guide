@@ -1,0 +1,416 @@
+[
+  {
+    "tag": "welcome",
+    "text": "您好，欢迎来到侨乡江门。我是 AI 智能讲解员小侨。这里的人把出洋叫「过番」，把寄回来的钱和信叫「侨批」——一砖一瓦、一封信、一片陈皮，都是他们留下的。",
+    "file": "183f4d43990314cd.wav",
+    "seconds": 14.4,
+    "cached": false,
+    "voice": "zh-CN-XiaoyiNeural",
+    "rate": "+10%"
+  },
+  {
+    "tag": "realtime",
+    "text": "这类实时信息我查不到——我是本机离线跑的讲解员，没有联网看天气、看新闻。侨乡的事你尽管问，碉楼、骑楼、陈皮、侨批我都熟。",
+    "file": "5b5ff2911de05849.wav",
+    "seconds": 12.26,
+    "cached": false,
+    "voice": "zh-CN-XiaoyiNeural",
+    "rate": "+10%"
+  },
+  {
+    "tag": "route",
+    "text": "先走赤坎的骑楼街，再看开平的碉楼，午后回新会：梁启超故居、小鸟天堂，最后喝一杯陈皮水。这一天走下来，侨乡的「走出去」和「寄回来」，就都看全了。",
+    "file": "b77da3c4da33fc8a.wav",
+    "seconds": 13.42,
+    "cached": false,
+    "voice": "zh-CN-XiaoyiNeural",
+    "rate": "+10%"
+  },
+  {
+    "tag": "fallback",
+    "text": "这个我一时答不上来。要不我陪您看看碉楼、骑楼街，或者聊一聊陈皮的年份？",
+    "file": "5d3bd7fe4b70dca8.wav",
+    "seconds": 6.89,
+    "cached": false,
+    "voice": "zh-CN-XiaoyiNeural",
+    "rate": "+10%"
+  },
+  {
+    "tag": "diaolou/brief",
+    "text": "华侨汇款回乡所建的多层塔楼，兼作住家与堡垒，开平现存一千八百多座。",
+    "file": "1260d6410d31a32d.wav",
+    "seconds": 7.1,
+    "cached": false,
+    "voice": "zh-CN-XiaoyiNeural",
+    "rate": "+10%"
+  },
+  {
+    "tag": "diaolou/script",
+    "text": "开平的碉楼，是华侨把在海外挣下的钱寄回家，一层一层盖起来的。眼前这座按瑞石楼的样子做：一九二三年动工，九层，是开平现存最高的一座。楼身是中式的，可柱式、栏杆、穹顶又带着意大利和拜占庭的样子，所以被叫作「开平第一楼」。当年洪水多、匪患重，碉楼既是住家，也是堡垒。台子前面有块牌子，写着它的年号，你可以对着看。",
+    "file": "3667add4cea2d173.wav",
+    "seconds": 29.57,
+    "cached": false,
+    "voice": "zh-CN-XiaoyiNeural",
+    "rate": "+10%"
+  },
+  {
+    "tag": "diaolou/deep",
+    "text": "开平现存的碉楼有一千八百多座，散在各个村落。二〇〇七年，「开平碉楼与村落」成为中国第一个以华侨文化为主题的世界文化遗产。碉楼的铁门、铁窗、燕子窝——也就是射击孔——还有探照灯，都是为防匪防洪设计的；顶层常常供着祖先牌位，也摆着从国外带回来的留声机和座钟。",
+    "file": "785a75de40acb808.wav",
+    "seconds": 23.66,
+    "cached": false,
+    "voice": "zh-CN-XiaoyiNeural",
+    "rate": "+10%"
+  },
+  {
+    "tag": "diaolou/faq0",
+    "text": "因为它像碉堡：墙厚、窗小、有射击孔，顶层还设探照灯。平时住人，匪来、水来就关起铁门自守。你抬头看这楼身，窗都开得又小又高，就是这个道理。",
+    "file": "b748e26541009101.wav",
+    "seconds": 14.11,
+    "cached": false,
+    "voice": "zh-CN-XiaoyiNeural",
+    "rate": "+10%"
+  },
+  {
+    "tag": "diaolou/faq1",
+    "text": "现存一千八百多座，分布在各个村落，二〇〇七年列入世界文化遗产。各年统计口径略有出入，一千八百是常用的说法。",
+    "file": "77efc40061e690c1.wav",
+    "seconds": 10.97,
+    "cached": false,
+    "voice": "zh-CN-XiaoyiNeural",
+    "rate": "+10%"
+  },
+  {
+    "tag": "diaolou/faq2",
+    "text": "大多是旅居南洋、美洲的华侨出资，把钱和图纸寄回家，由本地的匠人照着西洋样式施工。",
+    "file": "7b33ae7e4b79666f.wav",
+    "seconds": 8.06,
+    "cached": false,
+    "voice": "zh-CN-XiaoyiNeural",
+    "rate": "+10%"
+  },
+  {
+    "tag": "chikan/brief",
+    "text": "潭江边的华侨商埠，两公里骑楼街，楼下经商、楼上住人。",
+    "file": "5558ebd1696ee987.wav",
+    "seconds": 5.42,
+    "cached": false,
+    "voice": "zh-CN-XiaoyiNeural",
+    "rate": "+10%"
+  },
+  {
+    "tag": "chikan/script",
+    "text": "赤坎在潭江边上，三百多年前就是商埠。沿江两公里长的骑楼街，是上世纪二三十年代华侨出钱、照着海外样式盖起来的：楼下是铺面，楼上住人，骑楼伸出来替行人遮雨。当年银号、当铺、酒楼一字排开，所以人称「小广州」。",
+    "file": "6f26e71dd71f1858.wav",
+    "seconds": 20.06,
+    "cached": false,
+    "voice": "zh-CN-XiaoyiNeural",
+    "rate": "+10%"
+  },
+  {
+    "tag": "chikan/deep",
+    "text": "骑楼的上层是居住和仓储，下层是临街店铺；券廊、山花、彩色玻璃，把南洋和西洋的样式揉在了一起。赤坎的银号曾经管着周边几个县的侨汇，一封侨批寄到，钱就在这条街上兑成现洋。《一代宗师》《让子弹飞》都在这里取过景。",
+    "file": "8f7296d00ec637d6.wav",
+    "seconds": 20.38,
+    "cached": false,
+    "voice": "zh-CN-XiaoyiNeural",
+    "rate": "+10%"
+  },
+  {
+    "tag": "chikan/faq0",
+    "text": "沿街二层出挑、底层留出一条走廊的房子。下雨不淋、太阳不晒，楼下经商、楼上住人，是岭南商埠的典型样式。",
+    "file": "cb5ffbdabf000e36.wav",
+    "seconds": 10.32,
+    "cached": false,
+    "voice": "zh-CN-XiaoyiNeural",
+    "rate": "+10%"
+  },
+  {
+    "tag": "chikan/faq1",
+    "text": "因为银号、当铺、茶楼、酒楼一应俱全，商贸繁盛，规模和热闹劲被比作广州。",
+    "file": "606b78bf66788201.wav",
+    "seconds": 7.8,
+    "cached": false,
+    "voice": "zh-CN-XiaoyiNeural",
+    "rate": "+10%"
+  },
+  {
+    "tag": "chikan/faq2",
+    "text": "《一代宗师》《让子弹飞》等都在赤坎的骑楼街取景。",
+    "file": "596dff027dfd74d2.wav",
+    "seconds": 4.75,
+    "cached": false,
+    "voice": "zh-CN-XiaoyiNeural",
+    "rate": "+10%"
+  },
+  {
+    "tag": "liang/brief",
+    "text": "新会茶坑村的青砖民居，梁启超一八七三年生于此。",
+    "file": "0b31e8d9ff4b07b8.wav",
+    "seconds": 5.18,
+    "cached": false,
+    "voice": "zh-CN-XiaoyiNeural",
+    "rate": "+10%"
+  },
+  {
+    "tag": "liang/script",
+    "text": "梁启超是新会茶坑村人，一八七三年生在这座青砖黑瓦的岭南民居里。一厅两厢，门前有院，屋后是凤山。他十一岁随父亲到广州读书，后来成了戊戌变法的领袖，写下《少年中国说》——「少年强则国强」。如今故居旁边建起了纪念馆。",
+    "file": "ca669881102bd992.wav",
+    "seconds": 20.18,
+    "cached": false,
+    "voice": "zh-CN-XiaoyiNeural",
+    "rate": "+10%"
+  },
+  {
+    "tag": "liang/deep",
+    "text": "梁启超号饮冰室主人，一支笔影响了一代人。他的九个子女个个成才，其中有建筑学家梁思成、考古学家梁思永、火箭专家梁思礼，一门三院士。故居后的凤山上有座凌云塔，他少年时常登塔读书，后来在文章里还念叨过它。",
+    "file": "eb6e4a964260f432.wav",
+    "seconds": 19.49,
+    "cached": false,
+    "voice": "zh-CN-XiaoyiNeural",
+    "rate": "+10%"
+  },
+  {
+    "tag": "liang/faq0",
+    "text": "梁启超写于一九〇〇年，那句「少年强则国强」就出自这里。",
+    "file": "b61bbb0d6229380d.wav",
+    "seconds": 5.4,
+    "cached": false,
+    "voice": "zh-CN-XiaoyiNeural",
+    "rate": "+10%"
+  },
+  {
+    "tag": "liang/faq1",
+    "text": "九个子女皆成才，梁思成、梁思永、梁思礼三人是院士，人称「一门三院士，九子皆才俊」。",
+    "file": "6210f825d6d0133c.wav",
+    "seconds": 8.52,
+    "cached": false,
+    "voice": "zh-CN-XiaoyiNeural",
+    "rate": "+10%"
+  },
+  {
+    "tag": "liang/faq2",
+    "text": "在江门新会区茶坑村，青砖民居，旁边是梁启超纪念馆。",
+    "file": "ed1d9e875c12a26d.wav",
+    "seconds": 5.81,
+    "cached": false,
+    "voice": "zh-CN-XiaoyiNeural",
+    "rate": "+10%"
+  },
+  {
+    "tag": "chenpi/brief",
+    "text": "茶枝柑果皮晒干陈化三年以上而成，粤菜与中药里的老底子。",
+    "file": "a320b3d469634e4d.wav",
+    "seconds": 5.69,
+    "cached": false,
+    "voice": "zh-CN-XiaoyiNeural",
+    "rate": "+10%"
+  },
+  {
+    "tag": "chenpi/script",
+    "text": "新会陈皮用的是茶枝柑的果皮。冬至前后摘果，开成三瓣，晒干，再进仓陈化。三年以上才叫陈皮，年份越久香气越沉，所以有「一两陈皮一两金」的说法。它既是药材，也是广东人煲汤、煮糖水少不了的底味。你凑近看这几片，皮上那些小点就是油室，越密香气越足。",
+    "file": "488ff7e9c1cab4a3.wav",
+    "seconds": 23.66,
+    "cached": false,
+    "voice": "zh-CN-XiaoyiNeural",
+    "rate": "+10%"
+  },
+  {
+    "tag": "chenpi/deep",
+    "text": "新会陈皮讲「三时」：采摘、开皮、翻晒都有节令；仓储要离地、离墙、避光，每年还得翻晒一两次。入药理气健脾，《本草纲目》里就有记载。如今新会陈皮全产业链产值已过百亿元。同一片柑皮，青皮、微红、大红，香气和用处都不一样。",
+    "file": "8350aba5c282f133.wav",
+    "seconds": 22.44,
+    "cached": false,
+    "voice": "zh-CN-XiaoyiNeural",
+    "rate": "+10%"
+  },
+  {
+    "tag": "chenpi/faq0",
+    "text": "新会地处咸淡水交界，茶枝柑的果皮油室饱满、香气足，晒后陈化出的味道别处难仿。本地的老铺卖陈皮要按年份分开摆，三年、五年、十年，价钱一层层往上走。",
+    "file": "391b90c9e95379e6.wav",
+    "seconds": 15.19,
+    "cached": false,
+    "voice": "zh-CN-XiaoyiNeural",
+    "rate": "+10%"
+  },
+  {
+    "tag": "chenpi/faq1",
+    "text": "果皮晒干后要在仓里陈化满三年才称陈皮，不足三年的只能叫果皮。年份也不是越久越好——存得不好，返潮变味，反倒糟蹋了。",
+    "file": "4e1bfa1581c7f7e9.wav",
+    "seconds": 11.54,
+    "cached": false,
+    "voice": "zh-CN-XiaoyiNeural",
+    "rate": "+10%"
+  },
+  {
+    "tag": "chenpi/faq2",
+    "text": "入药理气健脾、化痰；做菜煲汤、煮糖水、泡茶都常用，是粤菜的老底味。",
+    "file": "50f3d7adf8e24d72.wav",
+    "seconds": 6.91,
+    "cached": false,
+    "voice": "zh-CN-XiaoyiNeural",
+    "rate": "+10%"
+  },
+  {
+    "tag": "qiaopi/brief",
+    "text": "汇款与家书合一的信件，粤语称信为「批」，二〇一三年入选世界记忆遗产。",
+    "file": "6a4bede6d043dea5.wav",
+    "seconds": 6.82,
+    "cached": false,
+    "voice": "zh-CN-XiaoyiNeural",
+    "rate": "+10%"
+  },
+  {
+    "tag": "qiaopi/script",
+    "text": "侨批是华侨寄回家的汇款和家书合在一起的信件——广东话里「批」就是信。一封侨批，一边是银钱，一边是写给父母妻儿的字。台山、开平的批局把信收齐，漂洋过海送回村里。二〇一三年，侨批档案入选世界记忆遗产名录。",
+    "file": "6c068387ad8f40fb.wav",
+    "seconds": 20.14,
+    "cached": false,
+    "voice": "zh-CN-XiaoyiNeural",
+    "rate": "+10%"
+  },
+  {
+    "tag": "qiaopi/deep",
+    "text": "侨批多从东南亚和美洲寄回，信封上写「外付银若干」，内页是毛笔小字：报平安、嘱家事、寄钱盖屋。五邑华侨博物馆藏了大量侨批，一封封读下来，就是一部侨乡的家史。批局既是邮局也是钱庄，一封批到家，往往先兑钱，再念信。",
+    "file": "0c9497e53ca013a5.wav",
+    "seconds": 20.5,
+    "cached": false,
+    "voice": "zh-CN-XiaoyiNeural",
+    "rate": "+10%"
+  },
+  {
+    "tag": "qiaopi/faq0",
+    "text": "华侨寄回家乡的汇款与家书的合称，粤语把信叫「批」，一封批里既有银钱，也有几句家常话。台子上的信纸就是照着老侨批的样子做的。",
+    "file": "4ba3e5d4275090d7.wav",
+    "seconds": 11.54,
+    "cached": false,
+    "voice": "zh-CN-XiaoyiNeural",
+    "rate": "+10%"
+  },
+  {
+    "tag": "qiaopi/faq1",
+    "text": "侨批档案二〇一三年入选联合国教科文组织世界记忆名录，是华侨史的一手材料。",
+    "file": "a15ba32fa154a63f.wav",
+    "seconds": 7.25,
+    "cached": false,
+    "voice": "zh-CN-XiaoyiNeural",
+    "rate": "+10%"
+  },
+  {
+    "tag": "qiaopi/faq2",
+    "text": "少则几元，多则数十元，积少成多，碉楼、骑楼、学堂，多半是这么一笔笔寄回来盖起的。",
+    "file": "5e15e217e49cf5b2.wav",
+    "seconds": 8.4,
+    "cached": false,
+    "voice": "zh-CN-XiaoyiNeural",
+    "rate": "+10%"
+  },
+  {
+    "tag": "bird/brief",
+    "text": "新会天马村一棵四百多年的古榕，因巴金《鸟的天堂》闻名。",
+    "file": "ada3250e146e3d92.wav",
+    "seconds": 5.93,
+    "cached": false,
+    "voice": "zh-CN-XiaoyiNeural",
+    "rate": "+10%"
+  },
+  {
+    "tag": "bird/script",
+    "text": "小鸟天堂在新会天马村，是一棵四百多年的古榕。榕树的气根垂下来扎进泥土，长成新的树干，一棵树慢慢长成了一座岛。一九三三年，巴金来这里写了一篇《鸟的天堂》，从此出了名。清晨和傍晚，成千的鸟飞进飞出。",
+    "file": "98592f3bfbb6bb37.wav",
+    "seconds": 18.86,
+    "cached": false,
+    "voice": "zh-CN-XiaoyiNeural",
+    "rate": "+10%"
+  },
+  {
+    "tag": "bird/deep",
+    "text": "这棵榕树覆盖面积约一万平方米，树上栖息着十几种鸟，以鹭鸟为主。当地人几百年不砍树、不惊鸟，一直护着它。景区修了观鸟长廊，就是为了让人看得见鸟、又不打扰鸟。巴金晚年还惦记着这里，题了「小鸟天堂」四个字。",
+    "file": "7a685db7811fbde4.wav",
+    "seconds": 19.08,
+    "cached": false,
+    "voice": "zh-CN-XiaoyiNeural",
+    "rate": "+10%"
+  },
+  {
+    "tag": "bird/faq0",
+    "text": "一九三三年到访后写下散文《鸟的天堂》，收进课本，让这里出了名。他晚年还题过「小鸟天堂」四个字，就在景区里。",
+    "file": "9201738719975fae.wav",
+    "seconds": 9.7,
+    "cached": false,
+    "voice": "zh-CN-XiaoyiNeural",
+    "rate": "+10%"
+  },
+  {
+    "tag": "bird/faq1",
+    "text": "树冠覆盖约一万平方米，气根落地长成新干，一棵树连成一片林。",
+    "file": "429e0d43e543965d.wav",
+    "seconds": 6.36,
+    "cached": false,
+    "voice": "zh-CN-XiaoyiNeural",
+    "rate": "+10%"
+  },
+  {
+    "tag": "bird/faq2",
+    "text": "清晨和傍晚，鹭鸟成群出巢、归巢，是观鸟最好的两个时段。",
+    "file": "e1375b23677c1a94.wav",
+    "seconds": 6.05,
+    "cached": false,
+    "voice": "zh-CN-XiaoyiNeural",
+    "rate": "+10%"
+  },
+  {
+    "tag": "chitchat0",
+    "text": "我是 AI 智能讲解员小侨。我能带你走一遍碉楼、骑楼街、梁启超故居、陈皮、侨批和小鸟天堂；也可以随口问我别的，历史、地理、写句话都行。想从哪儿开始？",
+    "file": "ca99265ece76251f.wav",
+    "seconds": 15.36,
+    "cached": false,
+    "voice": "zh-CN-XiaoyiNeural",
+    "rate": "+10%"
+  },
+  {
+    "tag": "chitchat1",
+    "text": "您好。慢慢走，侨乡的故事都在砖缝、信纸和柑皮里。",
+    "file": "8383ad2afcd10a04.wav",
+    "seconds": 5.69,
+    "cached": false,
+    "voice": "zh-CN-XiaoyiNeural",
+    "rate": "+10%"
+  },
+  {
+    "tag": "chitchat2",
+    "text": "不客气。愿您带走的不只是照片，还有一点侨乡的味道。",
+    "file": "8ce868c35ef51eb3.wav",
+    "seconds": 4.99,
+    "cached": false,
+    "voice": "zh-CN-XiaoyiNeural",
+    "rate": "+10%"
+  },
+  {
+    "tag": "chitchat3",
+    "text": "慢走。回程路上，记得带一罐新会陈皮。",
+    "file": "74cae77537c34f62.wav",
+    "seconds": 4.3,
+    "cached": false,
+    "voice": "zh-CN-XiaoyiNeural",
+    "rate": "+10%"
+  },
+  {
+    "tag": "chitchat4",
+    "text": "侨乡就是华侨的故乡。江门五邑有四百多万海外乡亲，比本地人口还多。出洋的人把钱和信寄回来，于是有了碉楼、骑楼、学堂，也有了侨批和陈皮这样的营生。",
+    "file": "124c9c05ef29bb15.wav",
+    "seconds": 14.33,
+    "cached": false,
+    "voice": "zh-CN-XiaoyiNeural",
+    "rate": "+10%"
+  },
+  {
+    "tag": "chitchat5",
+    "text": "江门俗称五邑，指新会、台山、开平、恩平、鹤山。这一带出洋的人多，所以处处是侨乡的痕迹。",
+    "file": "9ec0a39e40b87fab.wav",
+    "seconds": 9.86,
+    "cached": false,
+    "voice": "zh-CN-XiaoyiNeural",
+    "rate": "+10%"
+  }
+]

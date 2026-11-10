@@ -1,0 +1,24 @@
+[package]
+name = "qx-desktop"
+version = "0.1.0"
+edition.workspace = true
+description = "Qiaoxiang AI Tour Guide - Rust server + gpui-kit WebView2 shell, zero Python"
+
+[[bin]]
+name = "qx-desktop"
+path = "src/main.rs"
+
+[dependencies]
+qx-core = { path = "../qx-core" }
+gpui-kit = "0.9.0"
+gpui-webview = "0.9.0"
+wry = { version = "0.53.3", package = "lb-wry" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+zip = "0.6"
+# 离线神经语音（Piper VITS）：onnxruntime 动态加载（随 tts/ 资产释放），
+# api-24 与随包 onnxruntime.dll 1.24.x 对应。
+ort = { version = "=2.0.0-rc.15", default-features = false, features = ["std", "load-dynamic", "api-24"] }
+
+[build-dependencies]
+zip = "0.6"

@@ -1,0 +1,14 @@
+[package]
+name = "qx-core"
+version = "0.1.0"
+edition.workspace = true
+description = "Qiaoxiang AI Tour Guide - renderer-independent core (theme, NLU routing, LLM client, metrics)"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+regex = "1"
+thiserror = "2"
+
+[dev-dependencies]
+# 测试只用 std + 上面的依赖，不引入额外 crate

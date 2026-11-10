@@ -9,12 +9,15 @@
 | Three.js | r187 | 3D 渲染 | MIT | https://github.com/mrdoob/three.js |
 | @pixiv/three-vrm | 3.5.5 | VRM 数字人加载与表情 | MIT | https://github.com/pixiv/three-vrm |
 | sherpa-onnx | — | 离线流式语音识别（Paraformer / SenseVoice） | Apache-2.0 | https://github.com/k2-fsa/sherpa-onnx |
-| Piper | — | 离线神经网络语音合成 | MIT | https://github.com/rhasspy/piper |
+| Piper | — | 离线神经网络语音合成（VITS 声学模型） | MIT | https://github.com/rhasspy/piper |
+| ONNX Runtime | 1.24.1 | 神经网络推理运行时（Piper 声学模型执行） | MIT | https://github.com/microsoft/onnxruntime |
+| espeak-ng | 1.52 | 中文音素化（Piper 语音前端，随 exe 分发的 `espeakbridge.pyd`） | GPL-3.0 | https://github.com/espeak-ng/espeak-ng |
 | Ollama | — | 本地大模型运行时 | MIT | https://github.com/ollama/ollama |
 | Qwen2.5-7B-Instruct | — | 本地大语言模型权重 | Apache-2.0 | https://huggingface.co/Qwen/Qwen2.5-7B-Instruct |
 | FastAPI | — | 本地服务与 WebSocket 接口 | MIT | https://github.com/fastapi/fastapi |
 | Uvicorn | — | ASGI 服务器 | BSD-3-Clause | https://github.com/encode/uvicorn |
 | jieba | — | 中文分词（检索预处理） | MIT | https://github.com/fxsjy/jieba |
+| edge-tts | 7.3.1 | 构建期批量生成讲解语音（仅赛前使用，未随 exe 分发） | LGPL-3.0 | https://github.com/rany2/edge-tts |
 | cloudflared（仅演示用） | — | 临时公网隧道，非正式运行依赖 | Apache-2.0 | https://github.com/cloudflare/cloudflared |
 
 许可证全文随依赖包附带（`site-packages` 内 `LICENSE` 文件），本项目未修改上述组件源码。
@@ -35,7 +38,10 @@
 ## 四、字体与音频
 
 - 界面字体使用操作系统自带的「微软雅黑 / 思源宋体」，未打包分发字体文件。
-- 讲解语音由本地 Piper 模型实时合成，未使用第三方录音素材。
+- 讲解语音有两条来源：
+  1. **赛前预生成（演示默认）**：为保证普通话标准与音质，主题包内 46 条固定讲解词由微软在线神经语音（`zh-CN-XiaoxiaoNeural`）在赛前一次性批量合成，转为本地 22050 Hz WAV 后随程序分发。**比赛现场不联网**，程序直接读取本地缓存播放。该在线服务的使用需遵守微软相应服务条款，本作品仅用于非商业教学与竞赛演示；若评委要求全链路自主可控，删除 `rust-rewrite/prebuilt-voices/` 目录重新构建即可完全回退到第 2 条。
+  2. **现场离线合成（回退 / 自由问答）**：知识库未覆盖的自由回答由本地 Piper 神经网络模型实时合成（`zh_CN-huayan-medium` 女声，22050 Hz），经 espeak-ng 音素化后由 ONNX Runtime 推理；语音模型权重沿用其原始授权条款，仅用于本作品演示，不用于商业发行。
+- 未使用第三方录音素材。
 - 未使用第三方图片素材；页面图形均为 CSS/SVG 绘制。
 
 ## 五、数据与隐私
