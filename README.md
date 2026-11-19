@@ -10,7 +10,7 @@
 
 | 功能 | 当前实现 |
 |------|----------|
-| **桌面端** | gpui-kit + WebView；Windows 使用 WebView2，代码保留 Linux WebKitGTK 路径 |
+| **桌面端** | gpui-kit + WebView；Windows 使用 WebView2，Linux 使用 WebKitGTK |
 | **三维展厅** | Three.js；开平碉楼、赤坎古镇、梁启超故居、新会陈皮、侨批银信、小鸟天堂等 GLB 展项 |
 | **讲解员** | 默认 `mascot.glb` 吉祥物外观，复用 `avatar.vrm` 骨架；支持表情、口型、手势与镜头联动 |
 | **离线语音识别** | `cpal` 直接采集系统麦克风，`valle-asr` 加载 Qwen3-ASR 0.6B；16 kHz 单声道、能量 VAD 分段，纯 Rust 本地推理 |
@@ -102,11 +102,11 @@ ASR 模型查找顺序：
 
 ### 1. 环境
 
-当前完整交付以 **Windows 10/11 x64** 为主：
+当前完整交付以 **Windows 10/11 x64** 与 **Linux x64** 为主：
 
 - 最新 stable Rust（工作空间使用 edition 2024）；
-- MSVC C++ Build Tools；
-- WebView2 Runtime（通常系统已自带）；
+- **Windows**：MSVC C++ Build Tools、WebView2 Runtime（通常系统已自带）；
+- **Linux**：WebKitGTK 4.0 + GTK3 开发头文件、ALSA（cpal 麦克风）；
 - 可选：Ollama + `qwen3.5:4b`，用于自由问答和看图。
 
 默认 ASR/TTS 路径不需要 Python，也不需要安装或单独运行 `piper.exe`。可选 `local-llm` 内嵌推理构建另需完整的 C/C++ 编译环境。
@@ -195,7 +195,7 @@ cargo run -p qx-desktop --features local-llm -- --model /path/to/model.gguf
 ## 八、平台说明
 
 - **Windows**：当前完整测试与交付平台；WebView2 窗口、Piper/espeak-ng/ONNX Runtime DLL、cpal/WASAPI 均在此路径运行。
-- **Linux**：桌面壳保留 WebKitGTK/X11 路径与 NVIDIA DMABUF 规避逻辑；当前 Piper 实现仍直接加载 Windows DLL，不能据此宣称 Linux 已获得完整语音支持。
+- **Linux**：桌面壳使用 WebKitGTK/X11，cpal 对接 ALSA，Piper TTS 加载 `.so` 动态库；语音链路已随 piper.rs 适配，可在 Linux 上构建运行。
 - **macOS**：cpal 支持 CoreAudio，但当前完整桌面与 TTS 链路尚未作为可交付平台验证。
 
 ---

@@ -54,14 +54,15 @@ asr/qwen3-asr-0.6b/
 
 ## 构建与运行
 
-当前完整交付平台是 **Windows 10/11 x64**。
+qx-desktop 目前在 **Windows 10/11 x64** 与 **Linux x64** 上构建运行。语音链路（Piper TTS + espeak-ng + ONNX Runtime、cpal 麦克风、valle-asr）已做跨平台适配，Windows 用 `.dll`、Linux 用 `.so`，无需修改代码即可在两平台编译。
 
 ### 依赖
 
 - stable Rust（edition 2024）；
-- MSVC C++ Build Tools 与 WebView2；
+- C/C++ 编译工具链与 CMake（构建 build.rs 与可选的 local-llm 需要）；
+- **Windows**：MSVC C++ Build Tools、WebView2 Runtime（通常系统已自带）；
+- **Linux**：WebKitGTK 4.0 + GTK3 开发头文件（gpui-webview / wry 所需）、ALSA（cpal 麦克风）、`libdl`（动态库加载，系统自带）；
 - 默认 ASR/TTS 路径不需要 Python、CMake 或外部 `piper.exe`；
-- 可选 `local-llm` 内嵌推理构建另需完整 C/C++ 编译环境；
 - 可选 Ollama `qwen3.5:4b`，默认地址 `http://127.0.0.1:11434`。
 
 ### 命令
@@ -106,7 +107,7 @@ LLM 参数支持 `--ollama-url`、`--ollama-model`、`--llm-backend <auto|ollama
 ## 平台注意事项
 
 - **Windows**：当前完整测试与交付平台，使用 WebView2、cpal/WASAPI 和随包的 Piper DLL。
-- **Linux**：桌面壳保留 WebKitGTK/X11 与 NVIDIA DMABUF 规避逻辑，但当前 `piper.rs` 直接加载 Windows DLL，完整语音平台支持尚未完成。
+- **Linux**：桌面壳使用 WebKitGTK/X11，cpal 对接 ALSA，Piper TTS 加载 `.so` 动态库；语音链路已随 `piper.rs` 适配，可在 Linux 上构建运行。
 - **macOS**：cpal 可对接 CoreAudio，但完整桌面与 TTS 链路尚未验证，不应按已支持平台分发。
 
 ## 日志

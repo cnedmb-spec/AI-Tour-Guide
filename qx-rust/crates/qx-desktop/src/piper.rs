@@ -3,34 +3,93 @@
 //! 这是「真实女孩子声音」的关键：替换掉 Windows System.Speech 的机械拼接音。
 //! 与原 Python 版一致的技术栈（Piper + onnxruntime），但完全用 Rust 驱动。
 //!
-//!   * 音素化：`espeak-ng.dll`（Piper 官方发布，不依赖 Python，导出 espeak_Initialize /
+//!   * 音素化：`espeak-ng`（Piper 官方发布，不依赖 Python，导出 espeak_Initialize /
 //!     espeak_SetVoiceByName / espeak_TextToPhonemes）；
 //!   * 声学模型：`zh_CN-huayan-medium.onnx`（22050 Hz）；
-//!   * 推理：`ort`（onnxruntime 动态加载 `tts/onnxruntime.dll`）。
+//!   * 推理：`ort`（onnxruntime 动态加载 `tts/` 下的平台动态库，Windows `.dll` / Linux `.so`）。
 //!
 //! 全部离线，无需联网；单句 30 字合成约 0.2~0.9 s（RTF≈0.14），语速≈5.5 字/秒。
 
 use ort::session::Session;
 use std::collections::HashMap;
 use std::ffi::{c_char, c_int, c_void, CStr, CString};
-use std::os::windows::ffi::OsStrExt;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::Instant;
 
-#[link(name = "kernel32")]
-unsafe extern "system" {
-    fn LoadLibraryExW(name: *const u16, h_file: *mut c_void, dw_flags: u32) -> *mut c_void;
-    fn GetProcAddress(h: *mut c_void, name: *const c_char) -> *mut c_void;
+/// 平台动态库加载抽象：
+/// Windows：kernel32 LoadLibraryExW / GetProcAddress，宽字节路径；
+/// Linux：libdl dlopen / dlsym，UTF-8 路径直接传入。
+#[cfg(target_os = "windows")]
+mod imp {
+    use std::ffi::{c_char, c_void};
+    use std::os::windows::ffi::OsStrExt;
+    use std::path::Path;
+
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        pub(super) fn LoadLibraryExW(name: *const u16, h_file: *mut c_void, dw_flags: u32) -> *mut c_void;
+        pub(super) fn GetProcAddress(h: *mut c_void, name: *const c_char) -> *mut c_void;
+    }
+
+    pub(super) const LOAD_WITH_ALTERED_SEARCH_PATH: u32 = 0x0000_0008;
+    pub(super) const LIB_EXT: &str = ".dll";
+
+    pub(super) fn to_wide(s: &str) -> Vec<u16> {
+        std::ffi::OsStr::new(s).encode_wide().chain(std::iter::once(0)).collect()
+    }
+
+    pub(super) unsafe fn load_lib(path: &Path) -> *mut c_void {
+        let w = to_wide(&path.to_string_lossy());
+        LoadLibraryExW(w.as_ptr(), std::ptr::null_mut(), LOAD_WITH_ALTERED_SEARCH_PATH)
+    }
+
+    pub(super) unsafe fn get_sym(h: *mut c_void, name: &str) -> *mut c_void {
+        let c = match CString::new(name) {
+            Ok(c) => c,
+            Err(_) => return std::ptr::null_mut(),
+        };
+        GetProcAddress(h, c.as_ptr())
+    }
 }
 
-/// 让 DLL 的导入依赖优先从该 DLL 所在目录解析。
-const LOAD_WITH_ALTERED_SEARCH_PATH: u32 = 0x0000_0008;
+#[cfg(target_os = "linux")]
+mod imp {
+    use std::ffi::CString;
+    use std::ffi::c_void;
+    use std::os::raw::c_char;
+    use std::os::raw::c_int;
+    use std::path::Path;
 
-fn wide(s: &str) -> Vec<u16> {
-    std::ffi::OsStr::new(s).encode_wide().chain(std::iter::once(0)).collect()
+    #[link(name = "dl")]
+    unsafe extern "C" {
+        pub(super) fn dlopen(filename: *const c_char, flag: c_int) -> *mut c_void;
+        pub(super) fn dlsym(handle: *mut c_void, name: *const c_char) -> *mut c_void;
+    }
+
+    pub(super) const RTLD_NOW: c_int = 2;
+    pub(super) const RTLD_LOCAL: c_int = 0;
+    pub(super) const LIB_EXT: &str = ".so";
+
+    pub(super) unsafe fn load_lib(path: &Path) -> *mut c_void {
+        let c = match CString::new(path.to_string_lossy().as_bytes()) {
+            Ok(c) => c,
+            Err(_) => return std::ptr::null_mut(),
+        };
+        unsafe { dlopen(c.as_ptr(), RTLD_NOW | RTLD_LOCAL) }
+    }
+
+    pub(super) unsafe fn get_sym(h: *mut c_void, name: &str) -> *mut c_void {
+        let c = match CString::new(name) {
+            Ok(c) => c,
+            Err(_) => return std::ptr::null_mut(),
+        };
+        unsafe { dlsym(h, c.as_ptr()) }
+    }
 }
+
+use imp::{get_sym, load_lib, LIB_EXT};
 
 type EspeakInit = unsafe extern "C" fn(c_int, c_int, *const c_char, c_int) -> c_int;
 type EspeakSetVoice = unsafe extern "C" fn(*const c_char) -> c_int;
@@ -38,7 +97,7 @@ type EspeakTextToPhonemes = unsafe extern "C" fn(*mut *mut c_char, c_int, c_int)
 
 /// 引擎句柄 + 会话。espeak-ng 全局状态非线程安全，所有合成经由外层 Mutex 串行。
 struct Inner {
-    /// espeak-ng.dll 的模块句柄（保持加载，勿卸载）
+    /// espeak-ng 动态库的模块句柄（保持加载，勿卸载）
     _espeak_lib: usize,
     text_to_phonemes: EspeakTextToPhonemes,
     /// onnxruntime 环境必须与 Session 同寿命
@@ -70,8 +129,8 @@ impl PiperTts {
 
     fn has_assets(&self) -> bool {
         self.dir.join("zh_CN-huayan-medium.onnx").is_file()
-            && self.dir.join("espeak-ng.dll").is_file()
-            && self.dir.join("onnxruntime.dll").is_file()
+            && self.dir.join(format!("espeak-ng{LIB_EXT}")).is_file()
+            && self.dir.join(format!("onnxruntime{LIB_EXT}")).is_file()
     }
 
     fn init_inner(&self) -> Option<Inner> {
@@ -81,26 +140,24 @@ impl PiperTts {
             return None;
         }
         unsafe {
-            // 加载 espeak-ng.dll（Piper 官方发布，不依赖 Python）
-            let espeak_dll_path = dir.join("espeak-ng.dll");
-            let espeak_dll_wide = wide(&espeak_dll_path.to_string_lossy());
-            let h = LoadLibraryExW(espeak_dll_wide.as_ptr(), std::ptr::null_mut(), LOAD_WITH_ALTERED_SEARCH_PATH);
+            // 加载 espeak-ng 动态库（Piper 官方发布，不依赖 Python）
+            let espeak_dll_path = dir.join(format!("espeak-ng{LIB_EXT}"));
+            let h = load_lib(&espeak_dll_path);
             if h.is_null() {
                 let err = std::io::Error::last_os_error();
                 tracing::warn!(
                     dir = %dir.display(),
                     dll = %espeak_dll_path.display(),
                     last_os_error = %err,
-                    "加载 espeak-ng.dll 失败"
+                    "加载 espeak-ng 动态库失败"
                 );
                 return None;
             }
-            tracing::info!(dir = %dir.display(), "espeak-ng.dll 加载成功");
+            tracing::info!(dir = %dir.display(), "espeak-ng 动态库加载成功");
             let sym = |n: &str| -> Option<*mut c_void> {
-                let c = CString::new(n).ok()?;
-                let p = GetProcAddress(h, c.as_ptr());
+                let p = get_sym(h, n);
                 if p.is_null() {
-                    tracing::warn!(symbol = %n, "espeak-ng.dll 缺导出符号");
+                    tracing::warn!(symbol = %n, "espeak-ng 动态库缺导出符号");
                 }
                 (!p.is_null()).then_some(p)
             };
@@ -124,7 +181,7 @@ impl PiperTts {
                 return None;
             }
 
-            let env = match ort::init_from(dir.join("onnxruntime.dll")) {
+            let env = match ort::init_from(dir.join(format!("onnxruntime{LIB_EXT}"))) {
                 Ok(b) => match b.build() {
                     Ok(env) => env,
                     Err(e) => {
@@ -133,7 +190,7 @@ impl PiperTts {
                     }
                 },
                 Err(e) => {
-                    tracing::warn!(error = %e, "加载 onnxruntime.dll 失败");
+                    tracing::warn!(error = %e, "加载 onnxruntime 动态库失败");
                     return None;
                 }
             };
