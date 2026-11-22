@@ -115,10 +115,27 @@ export function createUI({ theme, themeList, guide, handlers }) {
   }
 
   let typeTimer = null;
+  let fadeTimer = null;
   let subtitleText = '';
+  // 字幕停留 2 秒后淡出消散。新字幕出现、被打断时取消待消散计时。
+  function scheduleFadeOut(ms = 2000) {
+    clearTimeout(fadeTimer);
+    fadeTimer = setTimeout(() => {
+      const el = $('subtitle');
+      if (!el.classList.contains('show')) return;
+      el.classList.remove('show');   // CSS transition 自动淡出
+      // 淡出过渡结束后清空内容，避免残留在隐藏元素里；同时让压暗层回落，不挡吉祥物
+      setTimeout(() => {
+        document.body.classList.remove('speaking');
+        if (!el.classList.contains('show')) el.innerHTML = '';
+      }, 420);
+    }, ms);
+  }
   function showSubtitle(text, who = theme.assistant.name, duration = 0) {
     if (!text) return;
     subtitleText = text;
+    clearTimeout(fadeTimer);   // 新字幕取消旧字幕的待消散计时
+    document.body.classList.add('speaking');   // 拉高底部压暗层，给字幕做背景
     const el = $('subtitle');
     el.innerHTML = `<span class="who"></span><span class="line"></span><span class="cursor"></span>`;
     el.querySelector('.who').textContent = who || '';
@@ -136,6 +153,7 @@ export function createUI({ theme, themeList, guide, handlers }) {
       if (i >= text.length) {
         clearInterval(typeTimer);
         cur.remove();
+        scheduleFadeOut(2000);   // 打字完成，停留 2 秒后消散
       }
     }, step);
   }
@@ -149,10 +167,13 @@ export function createUI({ theme, themeList, guide, handlers }) {
     const cur = el.querySelector('.cursor');
     if (line) line.textContent = subtitleText;
     if (cur) cur.remove();
+    scheduleFadeOut(2000);   // 音频结束，停留 2 秒后消散
   }
   function clearSubtitle() {
     subtitleText = '';
     clearInterval(typeTimer);
+    clearTimeout(fadeTimer);
+    document.body.classList.remove('speaking');   // 被打断立即回落压暗层
     const el = $('subtitle');
     el.classList.remove('show');
     el.innerHTML = '';

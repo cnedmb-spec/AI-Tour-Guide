@@ -111,10 +111,13 @@
   /* ─────────── 底部舞台 ─────────── */
   .stage{position:fixed;left:50%;bottom:calc(26px + var(--kb,0px));transform:translateX(-50%);width:min(880px,64vw);
     z-index:7;display:flex;flex-direction:column;align-items:center;gap:12px}
-  /* 底部压暗一层，字幕压在亮墙上也读得清；镜头推近展品时浅色模型会顶到字幕区，
-     遮罩抬高并加深中段（原 250px / .78 / .3），保证特写态仍有足够对比度 */
-  .stage::before{content:"";position:fixed;left:0;right:0;bottom:0;height:320px;z-index:-1;
+  /* 底部压暗层：平时只盖控件条（90px），不挡吉祥物脚部；
+      问答中（body.speaking）拉高到 260px 给字幕做背景，结束后平滑回落 */
+  .stage::before{content:"";position:fixed;left:0;right:0;bottom:0;height:90px;z-index:-1;
+    transition:height .5s cubic-bezier(.22,.8,.24,1);
     background:linear-gradient(to top,rgba(4,6,9,.86),rgba(4,6,9,.46) 52%,transparent);pointer-events:none}
+  /* 问答中：压暗层拉高，给字幕做背景；问答结束淡出后回落，不挡吉祥物脚部 */
+  body.speaking .stage::before{height:260px}
   .subtitle{width:100%;text-align:center;font-size:clamp(16px,1.15vw,25px);line-height:1.85;letter-spacing:.03em;
     text-shadow:0 2px 18px rgba(0,0,0,.92);opacity:0;transform:translateY(9px);min-height:0;
     transition:opacity .32s cubic-bezier(.22,.8,.24,1),transform .42s cubic-bezier(.2,.9,.3,1.14)}
@@ -135,6 +138,8 @@
 
   /* 输入器：一块圆角卡片把输入和所有操作收进去，深墨底 + 细金线，
      不再是一排零散的方按钮；主操作只留右下角一个圆形发送键 */
+  .composer-wrap{position:fixed;right:24px;bottom:calc(26px + var(--kb,0px));z-index:8;
+    width:min(440px,42vw);display:flex;flex-direction:column;align-items:flex-end;gap:10px}
   .composer{width:100%;background:linear-gradient(180deg,rgba(20,21,27,.95),rgba(10,11,15,.95));
     border:1px solid rgba(217,168,95,.18);border-radius:18px;
     box-shadow:0 18px 44px rgba(0,0,0,.5),inset 0 1px 0 rgba(255,255,255,.045);
@@ -161,8 +166,10 @@
     opacity:0;visibility:hidden;pointer-events:none;transition:opacity .18s,transform .18s}
   .tool:hover::after,.tool:focus-visible::after{opacity:1;visibility:visible;transform:translateX(-50%) translateY(0)}
   .foot .hint{margin-left:auto;font-size:10px;letter-spacing:.14em;color:rgba(255,255,255,.26);white-space:nowrap}
-  .shots{display:none;gap:8px;width:100%;padding:0 2px 8px;flex-wrap:wrap}
-  .shots.on{display:flex}
+  .shots{display:flex;justify-content:flex-start;gap:8px;width:100%;flex-wrap:wrap;
+    padding:0 16px;max-height:0;opacity:0;overflow:hidden;
+    transition:max-height .35s cubic-bezier(.22,.8,.24,1),opacity .25s ease,padding .35s ease}
+  .shots.on{max-height:96px;opacity:1;padding:12px 16px 4px}
   .shot{position:relative;width:58px;height:58px;border-radius:12px;overflow:hidden;
     border:1px solid rgba(217,168,95,.3);background:#0a0c10;box-shadow:0 6px 16px rgba(0,0,0,.42)}
   .shot img{width:100%;height:100%;object-fit:cover;display:block}
@@ -266,6 +273,7 @@
   @media (max-width:1280px){
     .drawer{width:300px}
     .stage{width:min(700px,58vw)}
+    .composer-wrap{width:min(400px,48vw);right:16px}
     .topbar{padding:24px 28px 0}
     .drawer.left{left:28px}
     .drawer.right{right:28px}
@@ -292,6 +300,8 @@
     .drawer.right{right:50%;width:min(88vw,322px);max-height:38vh;transform:translateX(50%)}
     .drawer.right.hide{transform:translateX(50%) translateY(16px)}
     .stage{width:min(94vw,700px);bottom:calc(12px + env(safe-area-inset-bottom,0px) + var(--kb,0px))}
+    .composer-wrap{right:12px;width:min(94vw,420px);
+      bottom:calc(12px + env(safe-area-inset-bottom,0px) + var(--kb,0px))}
     .composer input{font-size:16px;padding:13px 16px 2px}
     .errbar{top:104px;max-width:92vw}
     .toast{top:88px;max-width:92vw}
@@ -345,24 +355,24 @@
   }
 
   /* ─────────── 展品特写 · 讲解员同步画面 ─────────── */
-  /* 背景必须透明：画面由 WebGL 直接画在 canvas 上，这层只做边框与标签。
+  /* 吉祥物直接悬浮在主画面之上：这层只定义取景区位置，不再画边框/阴影，
+     棕色底色已在 scene.js 的 renderPip 里去掉（只清深度、只画 avatar）。
      尺寸按视口自适应：原先 190×238 在 1080p 里只占约 2%，人物小到看不清手势；
      现放到右上大片空白区，宽约 23vw；取景到头顶—大腿上段，双手完整可见。 */
   .pip-frame{position:fixed;right:clamp(18px,2vw,40px);top:clamp(104px,13vh,170px);
     width:clamp(280px,23vw,420px);aspect-ratio:4/5;
-    z-index:6;display:none;pointer-events:none;overflow:hidden;
-    border:1px solid rgba(217,168,95,.5);border-radius:6px;
-    box-shadow:0 18px 48px rgba(0,0,0,.55),inset 0 0 0 1px rgba(0,0,0,.2)}
+    z-index:6;display:none;pointer-events:none;overflow:hidden}
   .pip-frame.show{display:block;animation:pipIn .32s cubic-bezier(.2,.8,.25,1)}
   @keyframes pipIn{from{opacity:0;transform:translateY(10px) scale(.97)}to{opacity:1;transform:none}}
   /* 互动问答题板也在右侧：答题时小窗缩回右下角让位，讲解员仍保持可见；
      点「听小侨讲」收起题板后自动恢复大画面。 */
   body.quiz-open .pip-frame{top:auto;bottom:calc(228px + var(--kb,0px));
     width:190px;height:238px;aspect-ratio:auto}
+  /* 标签悬浮显示：不再垫深色渐变条，文字自带阴影保证可读性 */
   .pip-frame span{position:absolute;left:-1px;right:-1px;top:-1px;
     padding:9px 8px 12px;font-size:11px;letter-spacing:.18em;color:#edd8ad;
     text-align:center;border-radius:6px 6px 0 0;
-    background:linear-gradient(180deg,rgba(6,8,11,.82),rgba(6,8,11,.34) 62%,transparent)}
+    text-shadow:0 1px 5px rgba(0,0,0,.8),0 0 2px rgba(0,0,0,.9)}
   @media (max-width:860px){
     .pip-frame{right:12px;top:92px;width:132px;height:168px;aspect-ratio:auto}
     body.quiz-open .pip-frame{top:92px;bottom:auto}

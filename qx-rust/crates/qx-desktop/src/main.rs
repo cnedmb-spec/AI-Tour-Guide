@@ -28,7 +28,7 @@ mod local_llm;
 
 use std::fs;
 use std::io::Write as _;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use gpui_kit::*;
 use gpui_webview::WebView;
@@ -42,8 +42,10 @@ pub(crate) const BUNDLE_DIR_NAME: &str = "qx-guide-bundle-v11";
 /// 编译期打进 exe 的页面 + 主题包（build.rs 生成）。
 const BUNDLE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/bundle.zip"));
 
-/// 把内嵌资产释放到临时目录，返回作为 HTTP 服务根的路径。
+/// 把内嵌资产释放到可写目录，返回作为 HTTP 服务根的路径。
 /// 只在文件缺失或大小不一致时写入，重复启动不重复解压。
+/// 优先用系统临时目录（支持「exe 拷到任何位置都能双击运行」）；
+/// 若临时目录不可写（权限 / 沙箱限制），回退到 exe 自身所在目录，保证一定能释放。
 fn extract_bundle() -> PathBuf {
     // v3：新增 47MB 吉祥物模型与前端适配层。换目录名强制全量释放，
     // 避免「已存在且大小一致就跳过」让旧页面残留、新 mascot.glb 又不解压。
@@ -55,10 +57,21 @@ fn extract_bundle() -> PathBuf {
     // v11：语音识别改为 cpal 采集 + valle-asr/Qwen3-ASR，旧 whisper 资产不再随包。
     //      模型默认不嵌入 exe（>2 GB 的 exe 在部分 Windows 上无法启动），
     //      从 exe 同级 asr/ 或 QX_ASR_MODEL_DIR 加载；换目录清掉旧 whisper 残留。
-    let dir = std::env::temp_dir().join(BUNDLE_DIR_NAME);
 
-    // 清理旧版本残留目录（如 qx-guide-bundle-v8 等），避免旧 DLL 干扰新版
-    if let Ok(entries) = std::env::temp_dir().read_dir() {
+    // 候选释放目录：先系统临时目录，再 exe 同级目录。
+    let temp_dir = std::env::temp_dir();
+    let mut candidates: Vec<PathBuf> = vec![temp_dir.clone()];
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            let p = parent.to_path_buf();
+            if !candidates.contains(&p) {
+                candidates.push(p);
+            }
+        }
+    }
+
+    // 清理临时目录下的旧版本残留目录（如 qx-guide-bundle-v8 等），避免旧 DLL 干扰新版
+    if let Ok(entries) = temp_dir.read_dir() {
         for entry in entries.flatten() {
             let name = entry.file_name().to_string_lossy().to_string();
             if name.starts_with("qx-guide-bundle-") && name != BUNDLE_DIR_NAME {
@@ -67,27 +80,60 @@ fn extract_bundle() -> PathBuf {
         }
     }
 
-    let _ = fs::create_dir_all(&dir);
+    for base in &candidates {
+        let dir = base.join(BUNDLE_DIR_NAME);
+        // 先尝试建目录；建不出来说明该位置不可写，跳到下一个候选。
+        if let Err(e) = fs::create_dir_all(&dir) {
+            tracing::warn!(error = %e, path = %dir.display(), "释放目录不可写，尝试下一个候选位置");
+            continue;
+        }
+        if extract_into(&dir) {
+            tracing::info!(root = %dir.display(), "内嵌页面与主题包已释放");
+            return dir;
+        }
+        tracing::warn!(path = %dir.display(), "该位置解压失败，尝试下一个候选位置");
+    }
+
+    // 所有候选都失败：返回临时目录兜底（后续 load_theme 会报错并暴露真实原因）。
+    let fallback = temp_dir.join(BUNDLE_DIR_NAME);
+    tracing::error!(path = %fallback.display(), "所有候选释放位置均失败，回退到临时目录");
+    fallback
+}
+
+/// 把内嵌资产解压到指定目录，返回是否成功（解压过程中是否有写盘错误）。
+fn extract_into(dir: &Path) -> bool {
     let reader = std::io::Cursor::new(BUNDLE);
     let mut archive = match zip::ZipArchive::new(reader) {
         Ok(a) => a,
         Err(e) => {
             tracing::error!(error = %e, "内嵌资产 zip 损坏，无法释放页面资产");
-            return dir;
+            return false;
         }
     };
+    tracing::info!(entries = archive.len(), "内嵌 zip 已打开");
+    let mut ok = true;
     for i in 0..archive.len() {
         let mut f = match archive.by_index(i) {
             Ok(f) => f,
-            Err(_) => continue,
+            Err(e) => {
+                tracing::error!(error = %e, index = i, "by_index 失败");
+                ok = false;
+                continue;
+            }
         };
         let name = f.name().to_string();
         let out = dir.join(name.replace('\\', "/"));
         if f.is_dir() {
-            let _ = fs::create_dir_all(&out);
+            if let Err(e) = fs::create_dir_all(&out) {
+                tracing::error!(error = %e, path = %out.display(), "创建目录失败");
+                ok = false;
+            }
         } else {
             if let Some(parent) = out.parent() {
-                let _ = fs::create_dir_all(parent);
+                if let Err(e) = fs::create_dir_all(parent) {
+                    tracing::error!(error = %e, path = %parent.display(), "创建父目录失败");
+                    ok = false;
+                }
             }
             // 已存在且大小一致就跳过：几十 MB 资源重复写盘白白拖慢每次启动。
             let fresh = fs::metadata(&out)
@@ -97,12 +143,21 @@ fn extract_bundle() -> PathBuf {
                 continue;
             }
             // 流式写出：Qwen3-ASR 权重有 1.8 GB，整文件读进 Vec 会让启动峰值内存翻倍。
-            if let Ok(mut out_file) = fs::File::create(&out) {
-                let _ = std::io::copy(&mut f, &mut out_file);
+            match fs::File::create(&out) {
+                Ok(mut out_file) => {
+                    if let Err(e) = std::io::copy(&mut f, &mut out_file) {
+                        tracing::error!(error = %e, path = %out.display(), "写出文件失败");
+                        ok = false;
+                    }
+                }
+                Err(e) => {
+                    tracing::error!(error = %e, path = %out.display(), "创建文件失败");
+                    ok = false;
+                }
             }
         }
     }
-    dir
+    ok
 }
 
 pub struct AppView {

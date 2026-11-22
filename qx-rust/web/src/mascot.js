@@ -28,10 +28,14 @@ const GAIN = { head: 0.55, torso: 0.30, legL: 0.18, legR: 0.18 };
 // VRM 的讲解手势主要写 ua.rotation.x（大臂前后摆，实测跨度 1.38 rad），
 // 从正面看几乎只是手的透视缩放——20 帧时间序列里"跟没动一样"。
 // 改成把「前摆量」映射成绕 Z 的抬手，短手才会在屏幕上明显抬起 / 放下。
-// 0.62 是旧版（耳机被误判成手）实拍定的幅度。重归类后随动的是真正的小白手，
-// 相对袖口枢轴只有 ~0.10 m 臂长，0.62 在 420×525 小窗里位移偏小；
-// 提到 0.85 后抬手约 20 px，仍不会插进躯干或出画。
-const ARM_LIFT = 0.85;
+//
+// 2026-11-21 穿模修复：吉祥物 Q 版大头宽 0.95、躯干宽 0.69（模型单位），
+// 而手臂 pivot 在 x=±0.30，正好被大头下缘包住。旧值 0.85 在 VRM 强调手势
+// （ux 最低 -1.45）时 lift≈1.45 rad ≈ 83°，手臂整个翻进头里。
+// 现把 lift 上限压到 0.30 rad ≈ 17°，手臂只在身体两侧小幅抬起，
+// 不再碰头。手势的「活」感由头/躯干节奏承担，不靠手臂大幅挥舞。
+const ARM_LIFT = 0.30;
+const ARM_LIFT_MAX = 0.30;   // lift 硬上限（rad），防止语音重音叠加过冲
 
 const IDENTITY = new THREE.Quaternion();
 
@@ -132,7 +136,8 @@ export class MascotRig {
         const ly = la && lr ? la.rotation.y - lr.y : 0;
         const lz = la && lr ? la.rotation.z - lr.z : 0;
         const sign = part === 'armL' ? 1 : -1;
-        const lift = Math.max(0, Math.min(1.2, -dx)) * ARM_LIFT;
+        // 抬至 ARM_LIFT_MAX 就封顶，避免语音重音叠加过冲后手臂翻进头里
+        const lift = Math.min(ARM_LIFT_MAX, Math.max(0, Math.min(1.2, -dx)) * ARM_LIFT);
         pivot.rotation.set(
           -dx * 0.10 + ly * 0.18,                    // 保留一点前后透视
           sign * (dy * 0.20 + lz * 0.12),            // 肘部前送 → 轻微内外转

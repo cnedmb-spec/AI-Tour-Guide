@@ -708,22 +708,24 @@ export function createWorld(canvas, theme, models = null) {
     const prevAlpha = renderer.getClearAlpha();
     const prevAutoClear = renderer.autoClear;
     const prevShadow = renderer.shadowMap.autoUpdate;
-    // 关键修复：scene.background 是主题色（近黑），three.js 在 render() 里
-    // 会用它覆盖 renderer 的 clearColor。上一版只改 setClearColor 完全没生效，
-    // 060750 录屏取样仍是 (8,8,8)。这里临时替换 scene.background 才真正换底色。
+    // 老师反馈：小窗那块棕色底"不好看"，吉祥物要直接悬浮在画面上。
+    // 不清颜色、不铺 scene.background——小窗区域保留主镜头已画好的画面；
+    // 只清深度，并临时隐藏 world（房间/展台/展品），让 avatar 单独入画。
+    // 于是吉祥物"浮"在主场景之上，小窗边缘与画面无缝衔接，不再有画框感。
     const prevBg = scene.background;
-    const pipBg = new THREE.Color(0x4a3826);
+    const prevWorld = world.visible;
     renderer.autoClear = false;
     renderer.shadowMap.autoUpdate = false;   // 阴影主渲染已算过，不重复
     renderer.setScissorTest(true);
     renderer.setViewport(x, y, w, h);
     renderer.setScissor(x, y, w, h);
-    scene.background = pipBg;
-    renderer.setClearColor(pipBg, 1);
-    renderer.clear(true, true, false);
+    scene.background = null;
+    world.visible = false;
+    renderer.clear(false, true, false);
     pipCam.aspect = w / h;
     pipCam.updateProjectionMatrix();
     renderer.render(scene, pipCam);
+    world.visible = prevWorld;
     scene.background = prevBg;
     renderer.setScissorTest(false);
     renderer.setViewport(0, 0, window.innerWidth, window.innerHeight);

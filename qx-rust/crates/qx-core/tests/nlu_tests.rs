@@ -185,6 +185,33 @@ fn stub_llm_path_cleans_output() {
 }
 
 #[test]
+fn assistant_name_prefix_is_stripped_with_any_separator() {
+    // 模型偶发带上自称前缀，分隔符可能是：、：，。或空格，都应一并剥掉。
+    for raw in [
+        "小侨：这是答案",
+        "小侨,这是答案",
+        "小侨，这是答案",
+        "小侨。这是答案",
+        "小侨 这是答案",
+    ] {
+        struct Stub(&'static str);
+        impl qx_core::LlmClient for Stub {
+            fn chat(&self, _: &[Message], _: f32, _: u32) -> Result<String, String> {
+                Ok(self.0.into())
+            }
+        }
+        let g = Guide::with_llm(Theme::load(theme_path()).unwrap(), Arc::new(Stub(raw)));
+        let a = g.answer("随便聊点别的", None, false, None);
+        assert!(
+            !a.reply.starts_with("小侨"),
+            "应去掉自称前缀: {raw:?} -> {}",
+            a.reply
+        );
+        assert!(a.reply.contains("这是答案"), "应保留正文: {raw:?} -> {}", a.reply);
+    }
+}
+
+#[test]
 fn think_block_is_stripped_from_llm_output() {
     struct Thinking;
     impl qx_core::LlmClient for Thinking {

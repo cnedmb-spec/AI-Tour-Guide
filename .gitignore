@@ -85,3 +85,15 @@ PUBLIC-URL.txt
 
 # Local WorkBuddy workspace data (not part of the source)
 .workbuddy/
+
+# Local-only diagnostic / audit / backup artifacts (not part of the source)
+# OOXML/PPT audit workspace: 232MB, 1095 files incl. models/wav/dll/onnx
+tmp-ppt-audit/
+# Captured screenshots, certificates and one-off OCR/receiver scripts
+capture/
+# Extracted docx/pptx text dumps for the office audit
+office-audit/
+# Old frontend snapshot backup (pre-composer rewrite)
+backup-20261121-composer/
+# Machine-specific launcher (hardcoded absolute paths for this dev box)
+scripts/

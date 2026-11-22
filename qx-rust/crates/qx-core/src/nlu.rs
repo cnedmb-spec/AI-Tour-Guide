@@ -572,7 +572,8 @@ impl Guide {
         let mut system = format!(
             "你是{}的 AI 讲解员{}。先看清图片，再用讲解员的口吻回答。\
              图片若是展厅展品或侨乡风物，就结合已知资料介绍；若与侨乡无关，如实描述、友好回应，不必硬拉回展厅。\
-             只讲看得见的内容，拿不准就说拿不准。回答不超过 90 字，不分点、不加表情、不反问。",
+             若提供了多张图片，请逐张描述，格式为「第一张……；第二张……」，不要遗漏、不要只描述其中一张。\
+             只讲看得见的内容，拿不准就说拿不准。回答不超过 90 字（多张图逐张描述时可放宽到 160 字），不分点、不加表情、不反问。",
             self.theme.name, self.theme.assistant.name,
         );
         let names: Vec<String> = self
@@ -594,7 +595,11 @@ impl Guide {
             ));
         }
         let user_text = if text.trim().is_empty() {
-            "看看这张图，说说这是什么"
+            if images.len() > 1 {
+                "看看这几张图，逐张说说每张是什么"
+            } else {
+                "看看这张图，说说这是什么"
+            }
         } else {
             text
         };
@@ -613,7 +618,7 @@ impl Guide {
                 return None;
             }
         };
-        let cleaned = self.clean_llm(&raw, true);
+        let cleaned = self.clean_llm(&raw, true, if images.len() > 1 { 160 } else { 90 });
         (!cleaned.is_empty()).then_some(cleaned)
     }
 
@@ -647,11 +652,11 @@ impl Guide {
                 return None;
             }
         };
-        let cleaned = self.clean_llm(&raw, drop_redirect);
+        let cleaned = self.clean_llm(&raw, drop_redirect, 90);
         (!cleaned.is_empty()).then_some(cleaned)
     }
 
-    fn clean_llm(&self, text: &str, drop_redirect: bool) -> String {
+    fn clean_llm(&self, text: &str, drop_redirect: bool, max_chars: usize) -> String {
         // Qwen3.5 等思考模型可能把 <think>…</think> 思维链一起吐出来。必须在去掉
         // markdown 符号之前剥离（md 正则含 `>`，先把标签削成 `<think` 就再也匹配不到了）。
         // 同时处理被长度截断、只有开头没有闭合的情况。
@@ -672,7 +677,18 @@ impl Guide {
         let mut s = self.md.replace_all(&raw, "").to_string();
         s = s.lines().map(str::trim).collect::<Vec<_>>().join(" ");
         let mut s = s.trim().to_string();
-        for p in ["小侨：", "小侨:", "讲解员：", "讲解员:"] {
+        // 剥离模型偶发带上的助手自称前缀（"小侨：/小侨，/小侨。/小侨 " 等，分隔符不限）。
+        let name = &self.theme.assistant.name;
+        if s.starts_with(name.as_str()) {
+            let rest = &s[name.len()..];
+            let rest = rest
+                .trim_start_matches(|c: char| "：:，,。.、！!？?；; \t".contains(c))
+                .trim();
+            if !rest.is_empty() {
+                s = rest.to_string();
+            }
+        }
+        for p in ["讲解员：", "讲解员:"] {
             if let Some(rest) = s.strip_prefix(p) {
                 s = rest.trim().to_string();
                 break;
@@ -681,7 +697,7 @@ impl Guide {
         if drop_redirect {
             s = self.trim_redirect(&s);
         }
-        if char_len(&s) > 90 {
+        if char_len(&s) > max_chars {
             let chars: Vec<char> = s.chars().collect();
             let mut cut = None;
             for (i, c) in chars.iter().enumerate().take(90) {

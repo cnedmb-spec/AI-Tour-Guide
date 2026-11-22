@@ -2,7 +2,7 @@
 
 面向侨乡江门展厅的 AI 导览桌面应用：gpui-kit 原生窗口 + WebView 渲染 Three.js 场景，默认使用「小侨」吉祥物 GLB 外观并复用 VRM 骨架完成口型、视线和手势。语音识别、语音合成与展项知识库均可离线运行，本地 Ollama 提供自由问答和图片理解。
 
-前端、主题包、Piper 语音资产与预生成语音在编译期打包进 exe，运行时释放到临时目录，不依赖 Python，也不调用外部 `piper.exe`。**默认构建不把约 1.9 GB 的 ASR 权重嵌入 exe；需要语音识别时，应按下文同时分发 `asr/qwen3-asr-0.6b/`。**
+前端、主题包、Piper 语音资产与预生成语音在编译期打包进 exe，运行时优先释放到系统临时目录、该目录不可写（权限/沙箱限制）时自动回退到 exe 同级目录，不依赖 Python，也不调用外部 `piper.exe`。**默认构建不把约 1.9 GB 的 ASR 权重嵌入 exe；需要语音识别时，应按下文同时分发 `asr/qwen3-asr-0.6b/`。**
 
 ---
 
@@ -17,7 +17,7 @@
 | **离线语音合成** | Rust 直接驱动 Piper VITS `zh_CN-huayan-medium.onnx`；espeak-ng 音素化，ONNX Runtime 推理 |
 | **预生成语音** | `prebuilt-voices/` 中的本地 WAV 随包分发；未命中缓存时使用同一 Piper 离线模型合成 |
 | **本地大模型** | 默认 Ollama `http://127.0.0.1:11434`、模型 `qwen3.5:4b`；也可选择 llama-server、可选 GGUF 内嵌推理或禁用 LLM |
-| **图片理解** | 支持带图 `/api/ask`；Ollama 视觉模型优先按 `capabilities` 中的 `vision` 识别，旧版本回退模型名匹配 |
+| **图片理解** | 支持带图 `/api/ask`，可一次上传多张图片并逐张描述（「第一张……；第二张……」）；Ollama 视觉模型优先按 `capabilities` 中的 `vision` 识别，旧版本回退模型名匹配 |
 | **知识库回退** | 展项讲解、FAQ、互动题面和追问可在本地知识库直接作答；没有可用 LLM 时仍可完成馆内导览 |
 | **实时信息** | 明确的天气、新闻、比分意图会尝试联网查询；失败时使用本地兜底话术，不阻断导览 |
 | **零 Python 运行时** | HTTP 服务、知识库路由、ASR、TTS 与桌面窗口均由 Rust 进程承担 |
@@ -73,7 +73,7 @@ AI-Tour-Guide/
 └───────────────────────────────────────────────────────────┘
 ```
 
-`web/`、`themes/`、`tts/` 和 `prebuilt-voices/` 由 `build.rs` 打进 exe。启动时释放到系统临时目录中的版本化 bundle；ASR 默认外置，避免 Windows 无法启动超过约 2 GB 的 exe。
+`web/`、`themes/`、`tts/` 和 `prebuilt-voices/` 由 `build.rs` 打进 exe。启动时优先释放到系统临时目录中的版本化 bundle，若该目录不可写则自动回退到 exe 同级目录（便于 exe 拷到任何位置双击运行）；ASR 默认外置，避免 Windows 无法启动超过约 2 GB 的 exe。
 
 ---
 

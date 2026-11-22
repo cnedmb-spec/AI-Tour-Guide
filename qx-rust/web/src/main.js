@@ -624,6 +624,7 @@ async function replay() {
       speaking = false;
       avatar.stopSpeaking();
       avatar.setSpeaking(false);
+      ui.finishSubtitle();
       ui.setStatus('待机');
       ui.setPlaying(false);
     }
