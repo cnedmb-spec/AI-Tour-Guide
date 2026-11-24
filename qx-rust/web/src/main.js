@@ -20,6 +20,7 @@ let lastPartial = '';
 let finalText = '';
 let talkError = '';
 let lastReply = null;
+let exhibitSeqTimers = [];   // 多图展项序列切换定时器：新提问/停播时清空，避免旧序列串场
 let degraded = false;
 let mainRaf = 0;   // 主渲染循环句柄：降级时一并取消，避免空转调度（DEF-27）
 
@@ -507,13 +508,20 @@ async function runAsk(text, images) {
     } catch (e) { /* 保持为空，走「语音合成失败」提示 */ }
   }
 
-  currentExhibit = res.exhibit || currentExhibit;
-  if (res.exhibit && world.pedestals[res.exhibit]) {
-    const p = world.pedestals[res.exhibit];
-    world.focusOn(res.exhibit);
+  // 图片问答必须以本次识别结果为准：无展项时清空旧状态，避免影响下一张图。
+  // 纯文字问答仍保留旧状态，供「它/这个」等追问使用。
+  // 多图时后端返回与图片顺序一一对应的展项序列，首项先应用，其余按语音进度依次切换。
+  const seqArr = Array.isArray(res.exhibit_sequence) && images.length > 1
+    ? res.exhibit_sequence
+    : [];
+  const initialExhibit = seqArr.length ? seqArr[0] : res.exhibit;
+  currentExhibit = initialExhibit || (images.length ? null : currentExhibit);
+  if (initialExhibit && world.pedestals[initialExhibit]) {
+    const p = world.pedestals[initialExhibit];
+    world.focusOn(initialExhibit);
     avatar.faceTowards(p.pos);
     avatar.lookAtPoint(p.pos);
-    avatar.setExplainTarget(p.pos, res.exhibit);
+    avatar.setExplainTarget(p.pos, initialExhibit);
     // 风格表给的是「展品默认性格」；后端明确判出的强情绪（欢迎、赞叹等）优先
     if (res.emotion && res.emotion !== 'neutral') avatar.setEmotion(res.emotion);
   } else {
@@ -530,8 +538,10 @@ async function runAsk(text, images) {
   ui.showSubtitle(res.reply, theme.assistant.name, res.duration);
   ui.setElapsed(res.elapsed_ms);
   ui.setPlaying(true);
+  // 多图展项序列：按语音时长依次切换，让第 2、3 张图也能实时特写
+  scheduleExhibitSequence(seqArr, res.duration, seq);
 
-  lastReply = { text: res.reply, audio: res.audio, visemes: res.visemes, duration: res.duration, exhibit: res.exhibit };
+  lastReply = { text: res.reply, audio: res.audio, visemes: res.visemes, duration: res.duration, exhibit: res.exhibit, exhibit_sequence: res.exhibit_sequence };
   ui.setReplayable(true);
   // 回答一到就记进问答记录，不等语音播完（评委随时能翻）
   ui.pushQA({
@@ -559,6 +569,7 @@ async function runAsk(text, images) {
   if (seq !== askSeq) return;   // 播到一半被新问题打断
   // 音频真实结束（或解码失败）时对齐字幕；被打断时已由 stopSpeaking 清屏并在上面返回
   ui.finishSubtitle();
+  clearExhibitSeqTimers();      // 播完不再切换，交给 350ms 后的镜头复位
 
   speaking = false;
   avatar.stopSpeaking();
@@ -589,6 +600,41 @@ function stopSpeaking() {
   ui.clearSubtitle();      // 停播即清字幕，避免残句留在屏幕上
   ui.setStatus('待机');
   ui.setPlaying(false);
+  clearExhibitSeqTimers();
+}
+
+// 清掉在途的展项序列切换定时器（新提问、停播、重置全场都要调用）。
+function clearExhibitSeqTimers() {
+  exhibitSeqTimers.forEach((t) => clearTimeout(t));
+  exhibitSeqTimers = [];
+}
+
+// 多图问答：把后端返回的展项序列按语音时长依次切换，做到每张图对应一个特写。
+// seqArr 与图片顺序一一对应，null/空 表示该图无关、退出特写。
+// 首项已在回答返回时应用，这里只排第 2 项及以后。
+function scheduleExhibitSequence(seqArr, duration, seq) {
+  clearExhibitSeqTimers();
+  if (!Array.isArray(seqArr) || seqArr.length < 2 || duration <= 0) return;
+  const perMs = (duration * 1000) / seqArr.length;
+  for (let i = 1; i < seqArr.length; i += 1) {
+    exhibitSeqTimers.push(setTimeout(() => {
+      // 播到一半被新问题打断，不再切换（speaking 为 false 表示已停止）
+      if (seq !== askSeq || !speaking) return;
+      const id = seqArr[i];
+      if (id && world.pedestals[id]) {
+        const p = world.pedestals[id];
+        world.focusOn(id);
+        avatar.faceTowards(p.pos);
+        avatar.lookAtPoint(p.pos);
+        avatar.setExplainTarget(p.pos, id);
+      } else {
+        world.resetCamera();
+        avatar.resetFacing();
+        avatar.lookAtPoint({ x: 0, y: 1.55, z: 3.6 });
+        avatar.clearExplainTarget();
+      }
+    }, perMs * i));
+  }
 }
 
 // 用户主动停止：连同在途请求一起取消（DEF-06）。
@@ -602,7 +648,7 @@ function stopAll() {
 
 async function replay() {
   if (!lastReply) return;
-  const seq = askSeq;
+  const seq = ++askSeq;   // 重播也作废旧播报，避免两次重播的定时器互相踩踏
   stopSpeaking();
   await speaker.unlock().catch(() => {});
   speaking = true;
@@ -610,6 +656,8 @@ async function replay() {
   ui.setStatus('讲解中', 'speak');
   ui.setPlaying(true);
   ui.showSubtitle(lastReply.text, theme.assistant.name, lastReply.duration);
+  // 重播同样按展项序列逐张切换，保持和首次播放一致
+  scheduleExhibitSequence(lastReply.exhibit_sequence, lastReply.duration, seq);
   try {
     await speaker.play(lastReply.audio, lastReply.visemes, (v, amp) => {
       if (v) avatar.speakViseme(v, amp);
@@ -625,6 +673,7 @@ async function replay() {
       avatar.stopSpeaking();
       avatar.setSpeaking(false);
       ui.finishSubtitle();
+      clearExhibitSeqTimers();
       ui.setStatus('待机');
       ui.setPlaying(false);
     }

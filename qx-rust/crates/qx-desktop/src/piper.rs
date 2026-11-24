@@ -12,11 +12,11 @@
 
 use ort::session::Session;
 use std::collections::HashMap;
-use std::ffi::{c_char, c_int, c_void, CStr, CString};
+use std::ffi::{CStr, CString, c_char, c_int, c_void};
 use std::os::windows::ffi::OsStrExt;
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
 #[link(name = "kernel32")]
@@ -29,7 +29,10 @@ unsafe extern "system" {
 const LOAD_WITH_ALTERED_SEARCH_PATH: u32 = 0x0000_0008;
 
 fn wide(s: &str) -> Vec<u16> {
-    std::ffi::OsStr::new(s).encode_wide().chain(std::iter::once(0)).collect()
+    std::ffi::OsStr::new(s)
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect()
 }
 
 type EspeakInit = unsafe extern "C" fn(c_int, c_int, *const c_char, c_int) -> c_int;
@@ -54,13 +57,38 @@ struct Inner {
 
 pub struct PiperTts {
     dir: PathBuf,
+    model_path: PathBuf,
     inner: Mutex<Option<Inner>>,
     load_ms: AtomicU64,
 }
 
 impl PiperTts {
     pub fn new(dir: PathBuf) -> Self {
-        Self { dir, inner: Mutex::new(None), load_ms: AtomicU64::new(0) }
+        let model_path = Self::model_path_for(&dir, std::env::var_os("QX_TTS_MODEL"));
+        Self {
+            dir,
+            model_path,
+            inner: Mutex::new(None),
+            load_ms: AtomicU64::new(0),
+        }
+    }
+
+    fn model_path_for(dir: &Path, configured: Option<std::ffi::OsString>) -> PathBuf {
+        let bundled_model = dir.join("zh_CN-huayan-medium.onnx");
+        if let Some(configured) = configured {
+            let configured = PathBuf::from(configured);
+            let sidecar = configured.with_extension("onnx.json");
+            if configured.is_file() && sidecar.is_file() {
+                tracing::info!(model = %configured.display(), "使用 QX_TTS_MODEL 指定的 Piper 模型");
+                return configured;
+            }
+            tracing::warn!(
+                model = %configured.display(),
+                sidecar = %sidecar.display(),
+                "QX_TTS_MODEL 或配套配置不存在，回退到随包模型"
+            );
+        }
+        bundled_model
     }
 
     /// 自检面板用：引擎就绪耗时（毫秒），0 = 未就绪（将回退系统语音）。
@@ -69,7 +97,8 @@ impl PiperTts {
     }
 
     fn has_assets(&self) -> bool {
-        self.dir.join("zh_CN-huayan-medium.onnx").is_file()
+        self.model_path.is_file()
+            && self.model_path.with_extension("onnx.json").is_file()
             && self.dir.join("espeak-ng.dll").is_file()
             && self.dir.join("onnxruntime.dll").is_file()
     }
@@ -84,7 +113,11 @@ impl PiperTts {
             // 加载 espeak-ng.dll（Piper 官方发布，不依赖 Python）
             let espeak_dll_path = dir.join("espeak-ng.dll");
             let espeak_dll_wide = wide(&espeak_dll_path.to_string_lossy());
-            let h = LoadLibraryExW(espeak_dll_wide.as_ptr(), std::ptr::null_mut(), LOAD_WITH_ALTERED_SEARCH_PATH);
+            let h = LoadLibraryExW(
+                espeak_dll_wide.as_ptr(),
+                std::ptr::null_mut(),
+                LOAD_WITH_ALTERED_SEARCH_PATH,
+            );
             if h.is_null() {
                 let err = std::io::Error::last_os_error();
                 tracing::warn!(
@@ -138,7 +171,7 @@ impl PiperTts {
                 }
             };
             let session = match Session::builder(&env) {
-                Ok(mut b) => match b.commit_from_file(dir.join("zh_CN-huayan-medium.onnx")) {
+                Ok(mut b) => match b.commit_from_file(&self.model_path) {
                     Ok(s) => s,
                     Err(e) => {
                         tracing::warn!(error = %e, "加载 huayan.onnx 失败");
@@ -152,7 +185,7 @@ impl PiperTts {
             };
 
             let json: serde_json::Value = match serde_json::from_str(
-                &std::fs::read_to_string(dir.join("zh_CN-huayan-medium.onnx.json"))
+                &std::fs::read_to_string(self.model_path.with_extension("onnx.json"))
                     .map_err(|e| tracing::warn!(error = %e, "读取 onnx.json 失败"))
                     .ok()?,
             ) {
@@ -168,7 +201,11 @@ impl PiperTts {
             };
             let mut map = HashMap::new();
             for (k, v) in pm {
-                if let Some(id) = v.as_array().and_then(|a| a.first()).and_then(|x| x.as_i64()) {
+                if let Some(id) = v
+                    .as_array()
+                    .and_then(|a| a.first())
+                    .and_then(|x| x.as_i64())
+                {
                     if let Some(ch) = k.chars().next() {
                         // 音素表键均为单码点字符
                         if k.chars().count() == 1 {
@@ -180,7 +217,10 @@ impl PiperTts {
             let inf = &json["inference"];
             // 允许用环境变量现场调音（比赛现场微调语速/稳定度，无需重编译）
             let env_f32 = |k: &str, def: f32| -> f32 {
-                std::env::var(k).ok().and_then(|v| v.parse().ok()).unwrap_or(def)
+                std::env::var(k)
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(def)
             };
             Some(Inner {
                 _espeak_lib: h as usize,
@@ -199,7 +239,10 @@ impl PiperTts {
                     // 略微压缩节奏后接近真人讲解的 4.2 字/秒，现场可再用环境变量微调。
                     (inf["length_scale"].as_f64().unwrap_or(1.0) as f32) * 0.95,
                 ),
-                noise_w: env_f32("QX_TTS_NOISE_W", inf["noise_w"].as_f64().unwrap_or(0.8) as f32),
+                noise_w: env_f32(
+                    "QX_TTS_NOISE_W",
+                    inf["noise_w"].as_f64().unwrap_or(0.8) as f32,
+                ),
             })
         }
     }
@@ -255,7 +298,8 @@ impl PiperTts {
             return None;
         }
         if self.load_ms.load(Ordering::Relaxed) == 0 {
-            self.load_ms.store(t0.elapsed().as_millis() as u64, Ordering::Relaxed);
+            self.load_ms
+                .store(t0.elapsed().as_millis() as u64, Ordering::Relaxed);
         }
         Some(wav_bytes(&pcm, rate as u32))
     }
@@ -277,7 +321,9 @@ fn normalize_for_tts(text: &str) -> String {
         s = s.replace(from, to);
     }
     // 「」《》等只做视觉强调，朗读时去掉即可；破折号与省略号转成停顿
-    for ch in ['「', '」', '『', '』', '《', '》', '"', '"', '\'', '\'', '*', '#', '`'] {
+    for ch in [
+        '「', '」', '『', '』', '《', '》', '"', '"', '\'', '\'', '*', '#', '`',
+    ] {
         s = s.replace(ch, "");
     }
     s = s.replace("——", "，").replace("……", "，");
@@ -292,7 +338,11 @@ fn split_for_tts(text: &str) -> Vec<String> {
     let total = normalized.chars().count();
     if total <= 120 {
         let t = normalized.trim();
-        return if t.is_empty() { Vec::new() } else { vec![t.to_string()] };
+        return if t.is_empty() {
+            Vec::new()
+        } else {
+            vec![t.to_string()]
+        };
     }
     let mut out = Vec::new();
     let mut buf = String::new();
@@ -313,7 +363,11 @@ fn split_for_tts(text: &str) -> Vec<String> {
 fn trim_silence(samples: &[f32], rate: f32) -> Vec<f32> {
     const TH: f32 = 0.03;
     let margin = (0.02 * rate) as usize;
-    let start = samples.iter().position(|s| s.abs() > TH).unwrap_or(0).saturating_sub(margin);
+    let start = samples
+        .iter()
+        .position(|s| s.abs() > TH)
+        .unwrap_or(0)
+        .saturating_sub(margin);
     let end = samples
         .iter()
         .rposition(|s| s.abs() > TH)
@@ -391,7 +445,11 @@ fn wav_bytes(samples: &[f32], rate: u32) -> Vec<u8> {
     // 峰值归一到 0.92：Piper 原始输出电平偏低（RMS≈0.07），直接播放显得
     // 「不清晰、闷」，归一化后再写入，听感更饱满通透。
     let peak = samples.iter().fold(0.0f32, |m, s| m.max(s.abs()));
-    let gain = if peak > 0.001 { (0.92 / peak).min(4.0) } else { 1.0 };
+    let gain = if peak > 0.001 {
+        (0.92 / peak).min(4.0)
+    } else {
+        1.0
+    };
     let data: Vec<u8> = samples
         .iter()
         .flat_map(|s| ((((s * gain).clamp(-1.0, 1.0)) * 32767.0) as i16).to_le_bytes())
@@ -416,6 +474,23 @@ fn wav_bytes(samples: &[f32], rate: u32) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn custom_model_requires_sidecar_and_falls_back_to_bundle() {
+        let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tts");
+        let bundled = dir.join("zh_CN-huayan-medium.onnx");
+        assert_eq!(PiperTts::model_path_for(&dir, None), bundled);
+        assert_eq!(
+            PiperTts::model_path_for(&dir, Some(dir.join("missing.onnx").into_os_string())),
+            bundled,
+            "不存在的模型必须回退，不能覆盖正常配置"
+        );
+        assert_eq!(
+            PiperTts::model_path_for(&dir, Some(bundled.clone().into_os_string())),
+            bundled,
+            "显式模型及其配置存在时应保留用户选择"
+        );
+    }
 
     /// 手动跑（--ignored）：导出语音探针 wav，用于听感与识别率 A/B 对比。
     #[test]

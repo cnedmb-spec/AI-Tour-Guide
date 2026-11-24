@@ -1,30 +1,20 @@
-//! 赛前「离线小伊」语音烘焙（纯 Rust，无 Python）。
+//! 离线 Piper 语音烘焙（纯 Rust，无 Python）。
 //!
-//! 物理限制：微软没有放出 `zh-CN-XiaoyiNeural` 的本地权重，Windows 11 自带的
-//! 离线自然语音只有晓晓 / 云希，系统 SAPI 只有 Huihui 等老音色。因此**断网 +
-//! 任意新句子 + 小伊原声**三者无法同时成立。可行的等价方案是：把现场会说的
-//! 每一句话在联网时先用小伊合成好，按运行时缓存键 `tts_key` 命名放进
-//! `prebuilt-voices/`，由 build.rs 打进 exe；现场断网时直接命中磁盘缓存，
-//! 听到的仍是小伊本人。
+//! 把讲解词、兜底话术和演示回答用本地 Piper `zh_CN-huayan-medium` 合成 WAV，
+//! 按运行时缓存键 `tts_key` 命名放进 `prebuilt-voices/`，由 build.rs 打进 exe。
+//! 运行时优先使用这些语音，未命中缓存时再调用同一模型合成。
 //!
-//! 本模块把这套「赛前跑一遍 → 手动拷缓存」的人工流程做成一键命令：
-//!
+//! 一键命令：
 //! ```text
-//! QiaoxiangGuide.exe --bake-voices
+//! qx-desktop.exe --bake-voices
 //! ```
 //!
-//! 三路来源，全部只补缺失项，绝不重做已有的 46 条 wav：
-//! 1. **运行时缓存搬运**：赛前联网演示时，动态回答（自由问答 / 识图）已经由
-//!    `EdgeTts` 合成成 mp3 落在 `%TEMP%/qx-guide-bundle-v7/tts-cache/`。只认 mp3
-//!    魔数，避免把 `QX_TTS_EDGE=off` 时 Piper 华艳生成的 wav 误固化进 exe。
-//! 2. **硬编码降级话术**：`nlu.rs` 里不在 theme.json 中的识图失败 / 实时信息话术，
-//!    断网时最容易触发，却从来没有被预生成过。
-//! 3. **演示问答脚本**：用真实 `Guide`（接本机 Ollama `qwen3.5:4b`）跑一遍预设
-//!    问题，把 LLM 现场生成的回答也合成进 exe。
+//! 三路来源，全部只补缺失项：
+//! 1. **运行时缓存搬运**：把本机 Piper 生成的 WAV 固化到预生成目录。
+//! 2. **硬编码降级话术**：补齐 `nlu.rs` 中的识图失败 / 实时信息话术。
+//! 3. **演示问答脚本**：用 `Guide` 跑预设问题，再合成实际回答。
 //!
-//! 产物沿用既有约定：文件名 `<v8 FNV-1a>.wav`，内容可以是 mp3（`/api/audio/`
-//! 与 `wav_duration()` 都按魔数区分）。报告写到源码根 `voice_bake_report.txt`，
-//! 因为 GUI 子系统程序没有控制台，stdout 不可见。
+//! 产物沿用 `<v8 FNV-1a>.wav` 文件名；报告写到源码根 `voice_bake_report.txt`。
 
 use crate::http::{LlmConfig, build_llm, tts_key};
 use crate::piper::PiperTts;
@@ -39,7 +29,7 @@ use std::sync::Arc;
 const FIXED_REPLIES: &[&str] = &[
     "这张图我暂时看不了：当前模型不支持看图，或本地大模型还没连上。您可以直接用文字问我，我来介绍展厅里的展品。",
     "这张图我暂时看不了，可能是本地大模型正忙或还没连上。请再试一次，也可以直接用文字问我。",
-    "这类实时信息我查不到——我是本机离线跑的讲解员，没有联网看天气、看新闻。侨乡的事你尽管问，碉楼、骑楼、陈皮、侨批我都熟。",
+    "我现在没能查到这类实时信息，可能是网络或数据源暂时不可用。侨乡的事您尽管问，碉楼、骑楼、陈皮、侨批我都熟。",
 ];
 
 /// 赛前演示脚本：覆盖欢迎、六个展项的讲解 / 追问 / 深度讲解、路线、闲聊、
@@ -73,21 +63,20 @@ fn is_cache_name(s: &str) -> bool {
     let Some((stem, ext)) = s.split_once('.') else {
         return false;
     };
-    ext == "wav"
-        && stem.len() == 16
-        && stem.bytes().all(|b| b.is_ascii_hexdigit())
+    ext == "wav" && stem.len() == 16 && stem.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
 fn runtime_cache_dir() -> PathBuf {
-    std::env::var("QX_VOICE_BAKE_CACHE").map(PathBuf::from).unwrap_or_else(|_| {
-        std::env::temp_dir()
-            .join(crate::BUNDLE_DIR_NAME)
-            .join("tts-cache")
-    })
+    std::env::var("QX_VOICE_BAKE_CACHE")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| {
+            std::env::temp_dir()
+                .join(crate::BUNDLE_DIR_NAME)
+                .join("tts-cache")
+        })
 }
 
-/// 把演示时在线合成的小伊 mp3 从临时缓存固化进 `prebuilt-voices/`。
-/// 只搬 mp3：Piper / System.Speech 的产物是 RIFF wav，绝不混进来。
+/// 把运行时缓存里的本地 Piper WAV 固化进 `prebuilt-voices/`。
 fn copy_runtime_voices(out: &Path, existing: &mut HashSet<String>) -> (usize, usize, String) {
     let cache = runtime_cache_dir();
     let Ok(rd) = fs::read_dir(&cache) else {
@@ -104,8 +93,10 @@ fn copy_runtime_voices(out: &Path, existing: &mut HashSet<String>) -> (usize, us
         if existing.contains(&name) {
             continue;
         }
-        let Ok(data) = fs::read(e.path()) else { continue };
-        // Piper 输出是 RIFF wav，只搬 wav，绝不混入 Edge TTS 的 mp3
+        let Ok(data) = fs::read(e.path()) else {
+            continue;
+        };
+        // 仅接受 Piper 的 RIFF WAV，不把其他格式混入预生成语音。
         if !data.starts_with(b"RIFF") {
             continue;
         }
@@ -135,10 +126,12 @@ fn demo_replies(source_root: &Path, cfg: &LlmConfig) -> Vec<(String, String)> {
 }
 
 /// 主题包里所有可能成为 `answer.reply` 的文本（与 tools/prebuild_voices.py 同口径）。
-/// 现有 46 条已全部覆盖，这里仍列出，保证改文案后重跑烘焙能自动补齐。
+/// 保证改文案后重跑烘焙能自动补齐缺失语音。
 fn theme_texts(source_root: &Path) -> Vec<(String, String)> {
     let path = source_root.join("themes/qiaoxiang/theme.json");
-    let Ok(raw) = fs::read_to_string(&path) else { return Vec::new() };
+    let Ok(raw) = fs::read_to_string(&path) else {
+        return Vec::new();
+    };
     let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw) else {
         return Vec::new();
     };
@@ -246,9 +239,21 @@ pub fn run(source_root: &Path, cfg: &LlmConfig) -> String {
     let mut report = String::new();
     report.push_str("离线语音烘焙报告（Piper zh_CN-huayan-medium 女声）\n");
     report.push_str(&format!("输出目录：{}\n", out.display()));
-    report.push_str(&format!("运行时缓存：{}（扫描 {} 条，固化 {} 条 huayan wav）\n", cache_path, scanned, copied));
-    report.push_str(&format!("候选文本：主题包 + {} 条硬编码话术 + {} 条演示问答\n", FIXED_REPLIES.len(), DEMO_QUESTIONS.len()));
-    report.push_str(&format!("新增合成 {} 条 / 已有跳过 {} 条 / 失败 {} 条\n", added, skipped, failed.len()));
+    report.push_str(&format!(
+        "运行时缓存：{}（扫描 {} 条，固化 {} 条 huayan wav）\n",
+        cache_path, scanned, copied
+    ));
+    report.push_str(&format!(
+        "候选文本：主题包 + {} 条硬编码话术 + {} 条演示问答\n",
+        FIXED_REPLIES.len(),
+        DEMO_QUESTIONS.len()
+    ));
+    report.push_str(&format!(
+        "新增合成 {} 条 / 已有跳过 {} 条 / 失败 {} 条\n",
+        added,
+        skipped,
+        failed.len()
+    ));
     for f in &failed {
         report.push_str(&format!("  失败：{f}\n"));
     }
@@ -267,7 +272,10 @@ mod tests {
     fn fixed_replies_still_exist_in_nlu() {
         const NLU_SRC: &str = include_str!("../../qx-core/src/nlu.rs");
         for (i, s) in FIXED_REPLIES.iter().enumerate() {
-            assert!(NLU_SRC.contains(s), "第 {i} 条固定话术已不在 nlu.rs 中，请同步更新");
+            assert!(
+                NLU_SRC.contains(s),
+                "第 {i} 条固定话术已不在 nlu.rs 中，请同步更新"
+            );
         }
     }
 

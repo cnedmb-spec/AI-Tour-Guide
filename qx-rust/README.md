@@ -17,7 +17,7 @@ qx-rust/
 └── prebuilt-voices/   # 本地 Piper 预生成 WAV，随包嵌入
 ```
 
-`build.rs` 把 `web/`、`themes/`、`tts/`、`prebuilt-voices/` 打进 exe，运行时释放到版本化临时目录。默认不嵌入 ASR 权重，因此**能独立启动的 exe 不等于包含语音识别模型**。
+`build.rs` 把 `web/`、`themes/`、`tts/`、`prebuilt-voices/` 打进 exe，运行时释放到版本化临时目录；旧版本目录不会在启动时被自动删除，避免破坏其他正在运行的实例。默认不嵌入 ASR 权重，因此**能独立启动的 exe 不等于包含语音识别模型**。
 
 ## 当前语音链路
 
@@ -30,7 +30,7 @@ qx-rust/
 | 缓存 | `prebuilt-voices/` + `tts-cache/` | 优先播放已有 WAV，未命中时使用同一 Piper 模型实时合成 |
 | 降级 | 静音 WAV + 字幕 | 本地合成失败时不切换云端音色，也不阻断文字与画面 |
 
-Piper 调音环境变量：`QX_TTS_NOISE_SCALE`、`QX_TTS_LENGTH_SCALE`、`QX_TTS_NOISE_W`。
+`QX_TTS_MODEL` 可指定自定义 Piper `.onnx` 文件，其同目录必须提供配套的 `.onnx.json`；模型或配置缺失时回退到随包模型。调音环境变量：`QX_TTS_NOISE_SCALE`、`QX_TTS_LENGTH_SCALE`、`QX_TTS_NOISE_W`。
 
 ## ASR 模型与分发
 
@@ -86,7 +86,7 @@ cargo run -p qx-desktop -- --bake-voices
 cargo run -p qx-desktop --features local-llm -- --model /path/to/model.gguf
 ```
 
-LLM 参数支持 `--ollama-url`、`--ollama-model`、`--llm-backend <auto|ollama|llama|local|none>`。Ollama 不可用时，展项知识库仍可离线作答；自由问答和看图会进入明确的降级路径。
+LLM 参数支持 `--ollama-url`、`--ollama-model`、`--llm-backend <auto|ollama|llama|local|none>`。文本自由问答按会话 ID 保留最近 5 轮 LLM 对话，各访客上下文隔离；本地知识库回答与视觉问答不写入该历史。Ollama 不可用时，展项知识库仍可离线作答；自由问答和看图会进入明确的降级路径。
 
 ## 本机性能实测（2026-11-19）
 

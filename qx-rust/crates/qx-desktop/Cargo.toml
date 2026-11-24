@@ -9,11 +9,8 @@ name = "qx-desktop"
 path = "src/main.rs"
 
 [features]
-# 默认构建行为：走 Ollama + qwen3.5:4b，离线 VITS TTS 为可选（需 CMake + MSVC 编译 sherpa-onnx）
+# Piper TTS 与 ONNX Runtime 动态加载默认启用，无需额外 feature。
 default = []
-# 启用本地 VITS 离线语音合成（sherpa-onnx VITS，zh_CN-huayan-medium）
-# 需 C/C++ 工具链 + CMake，否则编译会失败
-vits = ["dep:sherpa-rs"]
 # mtmd = llama.cpp 多模态投影器，内置 Qwen2.5-VL 看图要用
 local-llm = ["dep:llama-cpp-2", "llama-cpp-2/mtmd"]
 
@@ -37,10 +34,7 @@ tracing-subscriber = { version = "0.3", features = [
 shen_eternity_log = { git = "https://github.com/EternityShen/shen_eternity_log.git" }
 tokio = { version = "1", default-features = false, features = ["rt"] }
 zip = "0.6"
-# 离线神经语音合成：sherpa-onnx VITS（Piper 格式 ONNX 模型）
-# 需 C/C++ 编译工具链 + CMake 静态编译 onnxruntime，跨平台，无需 Python。
-# qx-desktop 的 `vits` feature 控制是否编译 sherpa-rs 相关代码。
-# 离线神经语音合成：onnxruntime 动态加载（随 tts/ 资产释放）
+# 离线 Piper VITS：项目内 Rust 音素化与 ORT 动态加载实现（随 tts/ 资产释放）。
 ort = { version = "=2.0.0-rc.15", default-features = false, features = ["std", "load-dynamic", "api-24"] }
 
 # 麦克风采集：Windows WASAPI / macOS CoreAudio / Linux ALSA，替代浏览器 WebAudio
@@ -48,8 +42,6 @@ cpal = "0.18"
 # 离线语音识别：纯 Rust CPU 推理（Qwen3-ASR 0.6B）
 # 关闭默认的 download/cli 特性，避免引入 reqwest、CLI 和构建期模型下载。
 valle-asr = { version = "0.2.0", default-features = false, features = ["qwen3"] }
-
-sherpa-rs = { version = "0.6.8", default-features = false, optional = true, features = ["tts"] }
 
 llama-cpp-2 = { version = "0.1", optional = true }
 

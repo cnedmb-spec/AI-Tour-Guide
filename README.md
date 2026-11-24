@@ -11,12 +11,12 @@
 | 功能 | 当前实现 |
 |------|----------|
 | **桌面端** | gpui-kit + WebView；Windows 使用 WebView2，代码保留 Linux WebKitGTK 路径 |
-| **三维展厅** | Three.js；开平碉楼、赤坎古镇、梁启超故居、新会陈皮、侨批银信、小鸟天堂等 GLB 展项 |
+| **三维展厅** | Three.js；共 6 件展项：开平碉楼、赤坎古镇、梁启超故居、侨批银信使用 GLB，新会陈皮和小鸟天堂使用程序化模型 |
 | **讲解员** | 默认 `mascot.glb` 吉祥物外观，复用 `avatar.vrm` 骨架；支持表情、口型、手势与镜头联动 |
 | **离线语音识别** | `cpal` 直接采集系统麦克风，`valle-asr` 加载 Qwen3-ASR 0.6B；16 kHz 单声道、能量 VAD 分段，纯 Rust 本地推理 |
 | **离线语音合成** | Rust 直接驱动 Piper VITS `zh_CN-huayan-medium.onnx`；espeak-ng 音素化，ONNX Runtime 推理 |
 | **预生成语音** | `prebuilt-voices/` 中的本地 WAV 随包分发；未命中缓存时使用同一 Piper 离线模型合成 |
-| **本地大模型** | 默认 Ollama `http://127.0.0.1:11434`、模型 `qwen3.5:4b`；也可选择 llama-server、可选 GGUF 内嵌推理或禁用 LLM |
+| **本地大模型** | 默认 Ollama `http://127.0.0.1:11434`、模型 `qwen3.5:4b`；也可选择 llama-server、可选 GGUF 内嵌推理或禁用 LLM；按会话 ID 保留最近 5 轮文本问答上下文 |
 | **图片理解** | 支持带图 `/api/ask`，可一次上传多张图片并逐张描述（「第一张……；第二张……」）；Ollama 视觉模型优先按 `capabilities` 中的 `vision` 识别，旧版本回退模型名匹配 |
 | **知识库回退** | 展项讲解、FAQ、互动题面和追问可在本地知识库直接作答；没有可用 LLM 时仍可完成馆内导览 |
 | **实时信息** | 明确的天气、新闻、比分意图会尝试联网查询；失败时使用本地兜底话术，不阻断导览 |
@@ -73,7 +73,7 @@ AI-Tour-Guide/
 └───────────────────────────────────────────────────────────┘
 ```
 
-`web/`、`themes/`、`tts/` 和 `prebuilt-voices/` 由 `build.rs` 打进 exe。启动时优先释放到系统临时目录中的版本化 bundle，若该目录不可写则自动回退到 exe 同级目录（便于 exe 拷到任何位置双击运行）；ASR 默认外置，避免 Windows 无法启动超过约 2 GB 的 exe。
+`web/`、`themes/`、`tts/` 和 `prebuilt-voices/` 由 `build.rs` 打进 exe。启动时优先释放到系统临时目录中的版本化 bundle，若该目录不可写则自动回退到 exe 同级目录（便于 exe 拷到任何位置双击运行）；启动不会删除其他版本目录，以免影响正在运行的实例；ASR 默认外置，避免 Windows 无法启动超过约 2 GB 的 exe。
 
 ---
 
@@ -178,10 +178,11 @@ cargo run -p qx-desktop --features local-llm -- --model /path/to/model.gguf
 | 环境变量 | 说明 |
 |----------|------|
 | `QX_PORT` | HTTP 起始端口，默认 `8765`；被占用时向后尝试最多 8 个端口 |
-| `QX_HEADLESS=1` | 只启动 HTTP 服务，不创建窗口 |
+| `QX_HEADLESS=1` | 只启动 HTTP 服务，不创建窗口；HTTP 使用 8 个工作线程、32 个排队连接上限，过载时拒绝多余连接 |
 | `QX_ASR_MODEL_DIR` | 指定 Qwen3-ASR 模型目录 |
 | `QX_ASR_NO_WARMUP=1` | 跳过启动时的 ASR 权重预热，首次识别会变慢 |
 | `QX_EMBED_ASR=1` | 构建时嵌入 ASR 权重；默认不嵌入，超大 exe 在部分 Windows 上无法启动 |
+| `QX_TTS_MODEL` | 自定义 Piper `.onnx` 路径；同目录须有配套的 `.onnx.json`，无效时回退到随包模型 |
 | `QX_TTS_NOISE_SCALE` / `QX_TTS_LENGTH_SCALE` / `QX_TTS_NOISE_W` | 覆盖 Piper 推理调音参数 |
 | `QX_VOICE_BAKE_DIR` | 指定语音烘焙输出根目录，默认写回编译时源码根 |
 | `QX_VOICE_BAKE_CACHE` | 指定搬运运行时 WAV 缓存的来源目录 |

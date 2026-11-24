@@ -28,6 +28,8 @@ const IMAGE_COUNT_MAX: usize = 3;
 const IMAGE_CHARS_MAX: usize = 2_500_000;
 /// 前端日志单次请求体上限；正常只有一条错误消息 + 堆栈。
 const FRONTEND_LOG_MAX: usize = 16 * 1024;
+const HTTP_WORKERS: usize = 8;
+const HTTP_QUEUE_CAPACITY: usize = 32;
 
 /// LLM 后端选择：决定问答里的自由回答走哪条推理通道。
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -91,16 +93,32 @@ pub fn build_llm(cfg: &LlmConfig) -> Arc<dyn LlmClient> {
             // 防御性兜底：即便有人手工构造了空配置，也不能让后端连到空地址。
             let d = OllamaClient::default();
             Arc::new(OllamaClient {
-                host: if cfg.ollama_url.trim().is_empty() { d.host } else { cfg.ollama_url.clone() },
-                model: if cfg.ollama_model.trim().is_empty() { d.model } else { cfg.ollama_model.clone() },
+                host: if cfg.ollama_url.trim().is_empty() {
+                    d.host
+                } else {
+                    cfg.ollama_url.clone()
+                },
+                model: if cfg.ollama_model.trim().is_empty() {
+                    d.model
+                } else {
+                    cfg.ollama_model.clone()
+                },
                 timeout: Duration::from_secs(45),
             })
         }
         LlmBackend::LlamaServer => {
             let d = OllamaClient::default(); // 只借用默认地址/模型作为兜底
             Arc::new(LlamaServerClient {
-                host: if cfg.ollama_url.trim().is_empty() { d.host } else { cfg.ollama_url.clone() },
-                model: if cfg.ollama_model.trim().is_empty() { d.model } else { cfg.ollama_model.clone() },
+                host: if cfg.ollama_url.trim().is_empty() {
+                    d.host
+                } else {
+                    cfg.ollama_url.clone()
+                },
+                model: if cfg.ollama_model.trim().is_empty() {
+                    d.model
+                } else {
+                    cfg.ollama_model.clone()
+                },
                 timeout: Duration::from_secs(45),
             })
         }
@@ -108,10 +126,7 @@ pub fn build_llm(cfg: &LlmConfig) -> Arc<dyn LlmClient> {
             Some(path) => {
                 #[cfg(feature = "local-llm")]
                 {
-                    match crate::local_llm::LocalLlm::load(
-                        path,
-                        cfg.local_mmproj.as_deref(),
-                    ) {
+                    match crate::local_llm::LocalLlm::load(path, cfg.local_mmproj.as_deref()) {
                         Ok(m) => {
                             // 内置 Qwen2.5-VL 自带 mmproj，看图就在本进程完成，
                             // 不必（也不该）再经 Ollama 旁路；只有外置纯文本 GGUF
@@ -215,7 +230,7 @@ pub struct AppState {
     /// 供 /api/stats 展示的后端类型与模型名。
     llm_backend: String,
     llm_model: String,
-    /// 离线神经语音（Piper VITS，sherpa-onnx 驱动，zh_CN-huayan-medium），
+    /// 离线神经语音（Piper VITS，项目内 Rust 音素化 + ONNX Runtime，zh_CN-huayan-medium），
     /// 所有语音合成均使用此本地 ONNX 模型，不再调用云端 Edge TTS。
     pub piper: Arc<PiperTts>,
     pub tts_cache: PathBuf,
@@ -269,13 +284,8 @@ impl AppState {
         // 神经语音：ORT 会话 + huayan 模型在后台线程预加载，不拖慢开窗；
         // 预热后再空跑一句短文本，顺手得到真实的「TTS 实时率」指标。
         //
-        // 如果桌面上存在用户指定的 zh_CN-huayan-medium.onnx，优先使用它；
-        // 否则回退到 bundle 内的 tts/zh_CN-huayan-medium.onnx。
-        let desktop_onnx = Path::new(r"C:\Users\Administrator\Desktop\zh_CN-huayan-medium.onnx");
-        if desktop_onnx.exists() {
-            unsafe { std::env::set_var("QX_TTS_MODEL", desktop_onnx) };
-            tracing::info!(model = %desktop_onnx.display(), "使用桌面指定的 ONNX TTS 模型");
-        }
+        // PiperTts 自行解析 QX_TTS_MODEL；无效路径时回退到随包模型，
+        // 避免依赖开发者机器上的固定桌面路径。
         let piper = Arc::new(PiperTts::new(root.join("tts")));
         // 同步预加载 Piper 引擎，确保 AppState::new() 返回时语音已就绪，
         // 直接双击 exe 也能立即使用离线语音，不必等待后台线程。
@@ -337,10 +347,17 @@ impl AppState {
 
     /// 与原后端一致：本机直连 60 次/分，带代理来源头仍按 20 次/分。
     fn rate_check(&mut self, key: &str) -> Option<u64> {
-        let limit = if key.starts_with("pub:") { PUBLIC_LIMIT } else { LOCAL_LIMIT };
+        let limit = if key.starts_with("pub:") {
+            PUBLIC_LIMIT
+        } else {
+            LOCAL_LIMIT
+        };
         let now = Instant::now();
         let dq = self.rates.entry(key.to_string()).or_default();
-        while dq.front().is_some_and(|t| now.duration_since(*t) > RATE_WINDOW) {
+        while dq
+            .front()
+            .is_some_and(|t| now.duration_since(*t) > RATE_WINDOW)
+        {
             dq.pop_front();
         }
         if dq.len() >= limit {
@@ -356,7 +373,10 @@ impl AppState {
 }
 
 fn load_theme(root: &Path, id: &str) -> Result<Theme, String> {
-    if !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
+    if !id
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    {
         return Err("非法主题 id".into());
     }
     let p = root.join("themes").join(id).join("theme.json");
@@ -370,8 +390,8 @@ fn load_theme(root: &Path, id: &str) -> Result<Theme, String> {
 
 /// 启动服务线程，返回实际监听端口。
 pub fn spawn(root: PathBuf, port: u16, cfg: LlmConfig) -> Result<u16, String> {
-    let listener = TcpListener::bind(("127.0.0.1", port))
-        .map_err(|e| format!("端口 {port} 绑定失败: {e}"))?;
+    let listener =
+        TcpListener::bind(("127.0.0.1", port)).map_err(|e| format!("端口 {port} 绑定失败: {e}"))?;
     let actual = listener.local_addr().map_err(|e| e.to_string())?.port();
     let cfg_bg = cfg.clone();
     let state = Arc::new(Mutex::new(AppState::new(root, "qiaoxiang", cfg)?));
@@ -379,15 +399,28 @@ pub fn spawn(root: PathBuf, port: u16, cfg: LlmConfig) -> Result<u16, String> {
     let defer_llm = state.lock().unwrap().llm_loading;
     // 预热用的客户端克隆（与 AppState 内同一份），避免持有 state 锁。
     let warmup_llm = Arc::clone(&state.lock().unwrap().llm);
-    // 接收循环：先跑起来，不阻塞任何模型加载。
-    std::thread::spawn({
+    // 固定工作线程 + 有界队列，避免慢连接触发无上限线程增长。
+    let (tx, rx) = mpsc::sync_channel::<TcpStream>(HTTP_QUEUE_CAPACITY);
+    let rx = Arc::new(Mutex::new(rx));
+    for _ in 0..HTTP_WORKERS {
+        let rx = Arc::clone(&rx);
         let state = Arc::clone(&state);
-        move || {
-            for stream in listener.incoming() {
-                if let Ok(s) = stream {
-                    let st = state.clone();
-                    std::thread::spawn(move || handle_conn(s, st));
+        std::thread::spawn(move || {
+            loop {
+                // 只在取连接时持有接收锁；处理请求期间其他 worker 可继续取任务。
+                let stream = { rx.lock().unwrap().recv() };
+                match stream {
+                    Ok(stream) => handle_conn(stream, Arc::clone(&state)),
+                    Err(_) => break,
                 }
+            }
+        });
+    }
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(stream) = stream else { continue };
+            if let Err(mpsc::TrySendError::Full(stream)) = tx.try_send(stream) {
+                let _ = stream.shutdown(Shutdown::Both);
             }
         }
     });
@@ -408,7 +441,8 @@ pub fn spawn(root: PathBuf, port: u16, cfg: LlmConfig) -> Result<u16, String> {
                 "内置模型后台加载结束"
             );
             if llm.available() {
-                if let Err(e) = llm.chat(&[Message::user("（启动预热，请忽略）")], 0.0, 1) {
+                if let Err(e) = llm.chat(&[Message::user("（启动预热，请忽略）")], 0.0, 1)
+                {
                     tracing::debug!(error = %e, "大模型启动预热失败（首次提问会变慢，不影响功能）");
                 }
             }
@@ -418,7 +452,8 @@ pub fn spawn(root: PathBuf, port: u16, cfg: LlmConfig) -> Result<u16, String> {
         // 用户首次提问不再支付数秒~十几秒的冷加载；后端不可用时静默跳过。
         std::thread::spawn(move || {
             if warmup_llm.available() {
-                if let Err(e) = warmup_llm.chat(&[Message::user("（启动预热，请忽略）")], 0.0, 1) {
+                if let Err(e) = warmup_llm.chat(&[Message::user("（启动预热，请忽略）")], 0.0, 1)
+                {
                     tracing::debug!(error = %e, "大模型启动预热失败（首次提问会变慢，不影响功能）");
                 }
             }
@@ -459,7 +494,10 @@ fn handle_conn(stream: TcpStream, state: Arc<Mutex<AppState>>) {
     let path = raw_path.split('?').next().unwrap_or("/").to_string();
 
     // WebSocket：/ws/asr 仅作控制/结果通道（END 收尾），麦克风由后端 cpal 采集，见 asr.rs。
-    if headers.get("upgrade").is_some_and(|v| v.eq_ignore_ascii_case("websocket")) {
+    if headers
+        .get("upgrade")
+        .is_some_and(|v| v.eq_ignore_ascii_case("websocket"))
+    {
         if !origin_allowed(&headers) {
             let status = json_response(
                 &mut reader,
@@ -513,8 +551,7 @@ fn handle_conn(stream: TcpStream, state: Arc<Mutex<AppState>>) {
         .unwrap_or_else(|_| "unknown".into());
     // x-forwarded-for 客户端可任意伪造，轮换即可绕过限流；只有显式配置了
     // 可信反代（QX_TRUST_PROXY=1）才采用，否则一律以 TCP 对端 IP 为准。
-    let trust_proxy = std::env::var("QX_TRUST_PROXY")
-        .is_ok_and(|v| !v.is_empty() && v != "0");
+    let trust_proxy = std::env::var("QX_TRUST_PROXY").is_ok_and(|v| !v.is_empty() && v != "0");
     let rate_key = if trust_proxy {
         match headers.get("x-forwarded-for") {
             Some(x) => format!("pub:{}", x.split(',').next().unwrap_or("").trim()),
@@ -524,14 +561,24 @@ fn handle_conn(stream: TcpStream, state: Arc<Mutex<AppState>>) {
         peer
     };
 
-    let status = route(&mut reader, &state, &method, &path, &headers, &rate_key, &body);
+    let status = route(
+        &mut reader,
+        &state,
+        &method,
+        &path,
+        &headers,
+        &rate_key,
+        &body,
+    );
     log_access(&method, &path, status, started);
 }
 
 /// 同源校验：无 Origin（curl / 同源旧客户端）放行；有 Origin 则只允许
 /// 127.0.0.1 / localhost 页面。`null` 等沙箱来源一律拒绝。
 fn origin_allowed(headers: &HashMap<String, String>) -> bool {
-    let Some(origin) = headers.get("origin") else { return true };
+    let Some(origin) = headers.get("origin") else {
+        return true;
+    };
     let o = origin.trim().to_ascii_lowercase();
     if o.is_empty() {
         return true;
@@ -584,10 +631,9 @@ fn route(
             let mut st = state.lock().unwrap();
             match st.reload(id) {
                 Ok(()) => {
-                    let raw = fs::read_to_string(
-                        st.root.join("themes").join(id).join("theme.json"),
-                    )
-                    .unwrap_or_else(|_| "{}".into());
+                    let raw =
+                        fs::read_to_string(st.root.join("themes").join(id).join("theme.json"))
+                            .unwrap_or_else(|_| "{}".into());
                     drop(st);
                     return json_response(r, 200, &raw);
                 }
@@ -645,7 +691,11 @@ fn route(
             let p = st.tts_cache.join(name);
             drop(st);
             if let Ok(data) = fs::read(p) {
-                let ct = if data.starts_with(b"RIFF") { "audio/wav" } else { "audio/mpeg" };
+                let ct = if data.starts_with(b"RIFF") {
+                    "audio/wav"
+                } else {
+                    "audio/mpeg"
+                };
                 return write_response(r.get_mut(), 200, "OK", ct, &data, "");
             }
         }
@@ -663,13 +713,21 @@ fn route(
         return json_response(r, 405, &json!({"error": "method not allowed"}).to_string());
     }
     let web_root = state.lock().unwrap().web_root.clone();
-    let rel = if path == "/" { "index.html".to_string() } else { path.trim_start_matches('/').to_string() };
+    let rel = if path == "/" {
+        "index.html".to_string()
+    } else {
+        path.trim_start_matches('/').to_string()
+    };
     let rel = percent_decode(&rel);
     let safe = safe_join(&web_root, &rel);
     let Some(file) = safe else {
         return json_response(r, 403, &json!({"error": "forbidden"}).to_string());
     };
-    let file = if file.is_dir() { file.join("index.html") } else { file };
+    let file = if file.is_dir() {
+        file.join("index.html")
+    } else {
+        file
+    };
     match fs::read(&file) {
         Ok(data) => {
             let ctype = mime_for(&file);
@@ -687,7 +745,11 @@ fn route(
                 extra,
             )
         }
-        Err(_) => json_response(r, 404, &json!({"error": "not found", "path": path}).to_string()),
+        Err(_) => json_response(
+            r,
+            404,
+            &json!({"error": "not found", "path": path}).to_string(),
+        ),
     }
 }
 
@@ -762,7 +824,8 @@ fn handle_ask(
     if let Some(wait) = wait {
         tracing::warn!(wait_secs = wait, "请求触发限流");
         let extra = format!("Retry-After: {wait}\r\n");
-        let out = json!({"error": format!("请求过于频繁，请约 {wait} 秒后再试"), "retry_after": wait});
+        let out =
+            json!({"error": format!("请求过于频繁，请约 {wait} 秒后再试"), "retry_after": wait});
         return write_response(
             r.get_mut(),
             429,
@@ -772,8 +835,7 @@ fn handle_ask(
             &extra,
         );
     }
-    let (Some(guide), Some(piper), Some(tts_cache)) = (guide, piper, tts_cache)
-    else {
+    let (Some(guide), Some(piper), Some(tts_cache)) = (guide, piper, tts_cache) else {
         tracing::error!("问答状态不完整（内部错误）");
         return json_response(r, 500, &json!({"error": "内部状态不可用"}).to_string());
     };
@@ -808,13 +870,8 @@ fn handle_ask(
         }
     }
 
-    let answer = guide.answer_with_images(
-        &text,
-        exhibit.as_deref(),
-        deep,
-        session.as_deref(),
-        &images,
-    );
+    let answer =
+        guide.answer_with_images(&text, exhibit.as_deref(), deep, session.as_deref(), &images);
     if answer.action == "chat" && guide.llm_available() {
         state.lock().unwrap().llm_requests += 1;
     }
@@ -835,6 +892,7 @@ fn handle_ask(
         "emotion": answer.emotion,
         "gesture": answer.gesture,
         "exhibit": answer.exhibit,
+        "exhibit_sequence": answer.exhibit_sequence,
         "audio": audio,
         "audio_name": audio_name,
         "duration": duration,
@@ -917,7 +975,7 @@ pub(crate) fn tts_key(text: &str) -> String {
 }
 
 /// 决定音频走内联 base64 还是 `/api/audio/<name>` 文件。
-/// 严格离线模式的静音刻意不落盘（联网恢复后要重新合成为小伊），此时必须内联，
+/// 静音回退音频刻意不落盘，此时必须内联，
 /// 否则 `audio_name` 会指向一个不存在的文件，前端请求得到 404。
 fn audio_payload(tts_cache: &Path, name: &str, wav: &[u8]) -> (String, String) {
     let on_disk = tts_cache.join(name).is_file();
@@ -932,8 +990,6 @@ fn audio_payload(tts_cache: &Path, name: &str, wav: &[u8]) -> (String, String) {
 /// 以百分之一为单位存整型，供 /api/stats 展示「TTS 实时率」。
 static TTS_RTF_X100: AtomicU64 = AtomicU64::new(0);
 
-
-
 /// 磁盘上已有的离线语音条数，供 /api/stats 核对赛前烘焙覆盖率。
 fn cache_audio_count(dir: &Path) -> usize {
     fs::read_dir(dir)
@@ -945,7 +1001,7 @@ fn cache_audio_count(dir: &Path) -> usize {
 }
 
 /// 启动时记录已存在的音频文件名：主要是随 exe 释放的预生成语音，
-/// 它们是「断网也是小伊原声」的兜底，LRU 清理绝不能碰。
+/// 它们是断网仍可播放的本地 Piper 语音，LRU 清理绝不能碰。
 fn snapshot_audio_names(dir: &Path) -> Vec<String> {
     fs::read_dir(dir)
         .into_iter()
@@ -983,7 +1039,7 @@ fn prune_tts_cache(dir: &Path, protected: &[String]) {
     tracing::debug!(removed = overflow, "运行时语音缓存已按 LRU 清理");
 }
 
-/// 优先磁盘缓存；未命中按本地 ONNX（zh_CN-huayan-medium，sherpa-onnx VITS）合成。
+/// 优先磁盘缓存；未命中按本地 ONNX（zh_CN-huayan-medium，Piper VITS）合成。
 /// 彻底不可用时写入同长度静音 wav，保证前端 decodeAudioData 不失败、
 /// 不弹「语音合成失败」，字幕/口型/镜头照常工作。
 ///
@@ -997,10 +1053,9 @@ fn synthesize(piper: &PiperTts, tts_cache: &Path, text: &str) -> (Vec<u8>, f64, 
     if path.exists() {
         tracing::debug!(chars = text.chars().count(), "TTS 命中磁盘缓存");
     } else {
-        // 本地 VITS 神经语音（Piper huayan，sherpa-onnx 驱动）。
+        // 本地 VITS 神经语音（Piper huayan，ONNX Runtime 动态加载驱动）。
         let t0 = Instant::now();
         if let Some(wav) = piper.synth(text) {
-            let _ = fs::write(&path, &wav);
             let dur = wav_duration(&wav);
             if dur > 0.2 {
                 let rtf = (t0.elapsed().as_secs_f64() / dur * 100.0) as u64;
@@ -1011,6 +1066,12 @@ fn synthesize(piper: &PiperTts, tts_cache: &Path, text: &str) -> (Vec<u8>, f64, 
                     "VITS 离线合成完成（zh_CN-huayan-medium）"
                 );
             }
+            // 写盘只为下次命中缓存，结果不重要；本次一律把内存里的真实音频直接返回。
+            // 旧实现写盘后不保留 wav，靠 fs::read 从磁盘读回；在部分环境下 fs::write
+            // 静默失败（let _ = 吞掉错误），随后 fs::read 失败便落到 silent_wav(1.5)，
+            // 导致所有未命中缓存的问题（识图文本必然如此）都只有文字、没有声音。
+            let _ = fs::write(&path, &wav);
+            inline = Some(wav);
         } else {
             // 本地 ONNX 不可用：宁可只显示文字，不换发音人。
             tracing::warn!(
@@ -1028,7 +1089,11 @@ fn synthesize(piper: &PiperTts, tts_cache: &Path, text: &str) -> (Vec<u8>, f64, 
 }
 
 fn visemes_for(text: &str, dur: f64) -> Vec<Value> {
-    let n = text.chars().filter(|c| !c.is_whitespace()).count().clamp(1, 120);
+    let n = text
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .count()
+        .clamp(1, 120);
     let d = dur / n as f64;
     let vs = ["aa", "ih", "ou", "ee", "oh"];
     (0..n)
@@ -1081,7 +1146,11 @@ fn wav_duration(w: &[u8]) -> f64 {
     while off + 8 <= w.len() {
         let n = u32::from_le_bytes(w[off + 4..off + 8].try_into().unwrap_or([0; 4])) as usize;
         if &w[off..off + 4] == b"data" {
-            return if byte_rate > 0 { n as f64 / byte_rate as f64 } else { 0.0 };
+            return if byte_rate > 0 {
+                n as f64 / byte_rate as f64
+            } else {
+                0.0
+            };
         }
         off += 8 + n + (n % 2);
     }
@@ -1134,7 +1203,13 @@ fn reason(code: u16) -> &'static str {
 }
 
 fn mime_for(p: &Path) -> &'static str {
-    match p.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase().as_str() {
+    match p
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase()
+        .as_str()
+    {
         "html" | "htm" => "text/html; charset=utf-8",
         "js" | "mjs" | "cjs" => "text/javascript; charset=utf-8",
         "ts" | "cts" => "text/plain; charset=utf-8",
@@ -1196,7 +1271,9 @@ fn hex(c: u8) -> Option<u8> {
 }
 
 fn is_audio_name(s: &str) -> bool {
-    let Some((stem, ext)) = s.split_once('.') else { return false };
+    let Some((stem, ext)) = s.split_once('.') else {
+        return false;
+    };
     ext == "wav" && stem.len() == 16 && stem.chars().all(|c| c.is_ascii_hexdigit())
 }
 
@@ -1213,11 +1290,21 @@ fn b64(data: &[u8]) -> String {
     const T: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut s = String::with_capacity((data.len() + 2) / 3 * 4);
     for c in data.chunks(3) {
-        let n = ((c[0] as u32) << 16) | ((c.get(1).copied().unwrap_or(0) as u32) << 8) | c.get(2).copied().unwrap_or(0) as u32;
+        let n = ((c[0] as u32) << 16)
+            | ((c.get(1).copied().unwrap_or(0) as u32) << 8)
+            | c.get(2).copied().unwrap_or(0) as u32;
         s.push(T[((n >> 18) & 63) as usize] as char);
         s.push(T[((n >> 12) & 63) as usize] as char);
-        s.push(if c.len() > 1 { T[((n >> 6) & 63) as usize] as char } else { '=' });
-        s.push(if c.len() > 2 { T[(n & 63) as usize] as char } else { '=' });
+        s.push(if c.len() > 1 {
+            T[((n >> 6) & 63) as usize] as char
+        } else {
+            '='
+        });
+        s.push(if c.len() > 2 {
+            T[(n & 63) as usize] as char
+        } else {
+            '='
+        });
     }
     s
 }
@@ -1446,7 +1533,13 @@ fn ws_text(w: &mut impl Write, s: &str) {
 }
 
 fn sha1(data: &[u8]) -> [u8; 20] {
-    let mut h: [u32; 5] = [0x6745_2301, 0xEFCD_AB89, 0x98BA_DCFE, 0x1032_5476, 0xC3D2_E1F0];
+    let mut h: [u32; 5] = [
+        0x6745_2301,
+        0xEFCD_AB89,
+        0x98BA_DCFE,
+        0x1032_5476,
+        0xC3D2_E1F0,
+    ];
     let mut msg = data.to_vec();
     let bits = (msg.len() as u64) * 8;
     msg.push(0x80);
@@ -1517,7 +1610,10 @@ mod tests {
         let d = OllamaClient::default();
         assert_eq!(cfg.ollama_url, d.host);
         assert_eq!(cfg.ollama_model, "qwen3.5:4b");
-        assert!(cfg.ollama_url.contains("11434"), "默认端口必须是 Ollama 的标准端口 11434");
+        assert!(
+            cfg.ollama_url.contains("11434"),
+            "默认端口必须是 Ollama 的标准端口 11434"
+        );
         assert!(cfg.local_model.is_none());
 
         // 即便手工构造了空配置，展示名与客户端也必须被兜底，不能留空
@@ -1543,9 +1639,15 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let dir = std::env::temp_dir().join(format!("qx-cache-count-{}-{nanos}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("qx-cache-count-{}-{nanos}", std::process::id()));
         fs::create_dir_all(&dir).expect("创建测试临时目录");
-        for n in ["0e5bbf57873c8703.wav", "ABCDEF0123456789.wav", "notes.txt", "short.wav"] {
+        for n in [
+            "0e5bbf57873c8703.wav",
+            "ABCDEF0123456789.wav",
+            "notes.txt",
+            "short.wav",
+        ] {
             fs::write(dir.join(n), b"RIFF").unwrap();
         }
         assert_eq!(cache_audio_count(&dir), 2);
@@ -1561,7 +1663,8 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let dir = std::env::temp_dir().join(format!("qx-audio-payload-{}-{nanos}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("qx-audio-payload-{}-{nanos}", std::process::id()));
         fs::create_dir_all(&dir).expect("创建测试临时目录");
         let name = "0123456789abcdef.wav";
         let big = vec![0u8; INLINE_AUDIO_LIMIT + 1];
@@ -1599,7 +1702,11 @@ mod tests {
 
         let answer = guide.answer("介绍开平碉楼", None, false, None);
         assert!(!answer.reply.is_empty(), "知识库应命中碉楼条目");
-        println!("reply({}字): {}", answer.reply.chars().count(), answer.reply);
+        println!(
+            "reply({}字): {}",
+            answer.reply.chars().count(),
+            answer.reply
+        );
 
         let hex = tts_key(&answer.reply);
         let (wav, dur, visemes) = synthesize(&piper, &tts_cache, &answer.reply);
@@ -1611,7 +1718,10 @@ mod tests {
 
         // 神经语音口径：约 5 字/秒，不应出现系统语音那种拖沓
         let rate = answer.reply.chars().count() as f64 / dur;
-        assert!(rate > 3.5, "语速应接近真人讲解（>3.5 字/秒），实测 {rate:.1}");
+        assert!(
+            rate > 3.5,
+            "语速应接近真人讲解（>3.5 字/秒），实测 {rate:.1}"
+        );
 
         // 二次合成同文本：直接命中磁盘缓存
         let (wav2, dur2, _) = synthesize(&piper, &tts_cache, &answer.reply);
@@ -1626,12 +1736,19 @@ mod tests {
     fn prebuilt_voice_keys_match_runtime() {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../");
         let dir = root.join("prebuilt-voices");
-        let Ok(rd) = std::fs::read_dir(&dir) else { return };
-        if !rd.flatten().any(|e| e.path().extension().is_some_and(|x| x == "wav")) {
+        let Ok(rd) = std::fs::read_dir(&dir) else {
+            return;
+        };
+        if !rd
+            .flatten()
+            .any(|e| e.path().extension().is_some_and(|x| x == "wav"))
+        {
             return;
         }
         let manifest = root.join("voice_manifest.json");
-        let Ok(raw) = std::fs::read_to_string(&manifest) else { return };
+        let Ok(raw) = std::fs::read_to_string(&manifest) else {
+            return;
+        };
         let list: serde_json::Value = serde_json::from_str(&raw).expect("清单应为合法 JSON");
         for item in list.as_array().expect("清单应为数组") {
             let text = item["text"].as_str().expect("清单条目缺少 text");
@@ -1642,7 +1759,10 @@ mod tests {
                 item["tag"]
             );
         }
-        println!("预生成语音 {} 条缓存键全部匹配", list.as_array().unwrap().len());
+        println!(
+            "预生成语音 {} 条缓存键全部匹配",
+            list.as_array().unwrap().len()
+        );
     }
 
     /// 人机互动环节：每道题的追问必须命中知识库，且对应答案的语音必须已赛前
@@ -1657,22 +1777,32 @@ mod tests {
         let quiz = json["quiz"].as_array().expect("主题包应包含 quiz 题库");
         assert!(!quiz.is_empty(), "互动题库不应为空");
 
-        let guide = Guide::new(Theme::load(theme_path.to_string_lossy().to_string()).expect("加载主题包"));
+        let guide =
+            Guide::new(Theme::load(theme_path.to_string_lossy().to_string()).expect("加载主题包"));
         let prebuilt = root.join("prebuilt-voices");
         for (i, q) in quiz.iter().enumerate() {
             let opts = q["options"].as_array().expect("题目缺少 options");
             let answer = q["answer"].as_u64().expect("题目缺少 answer") as usize;
-            assert!(opts.len() >= 2 && answer < opts.len(), "第 {i} 题选项或答案越界");
+            assert!(
+                opts.len() >= 2 && answer < opts.len(),
+                "第 {i} 题选项或答案越界"
+            );
             let followup = q["followup"].as_str().expect("题目缺少 followup");
             let a = guide.answer(followup, None, false, None);
             assert!(!a.reply.is_empty(), "第 {i} 题追问「{followup}」没有答案");
-            assert_ne!(a.action, "chat", "第 {i} 题追问「{followup}」未命中知识库，会走大模型");
+            assert_ne!(
+                a.action, "chat",
+                "第 {i} 题追问「{followup}」未命中知识库，会走大模型"
+            );
             let key = format!("{}.wav", tts_key(&a.reply));
             assert!(
                 prebuilt.join(&key).is_file(),
                 "第 {i} 题追问「{followup}」缺少预生成语音 {key}，请重跑 tools/prebuild_voices.py"
             );
         }
-        println!("互动题库 {} 题：追问全部命中知识库且已有标准普通话语音", quiz.len());
+        println!(
+            "互动题库 {} 题：追问全部命中知识库且已有标准普通话语音",
+            quiz.len()
+        );
     }
 }

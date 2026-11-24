@@ -56,7 +56,7 @@ fn extract_bundle() -> PathBuf {
     // v9：新增 asr/（whisper.dll + ggml*.dll + base 量化模型），换目录避免旧版残留 DLL 干扰
     // v11：语音识别改为 cpal 采集 + valle-asr/Qwen3-ASR，旧 whisper 资产不再随包。
     //      模型默认不嵌入 exe（>2 GB 的 exe 在部分 Windows 上无法启动），
-    //      从 exe 同级 asr/ 或 QX_ASR_MODEL_DIR 加载；换目录清掉旧 whisper 残留。
+    //      从 exe 同级 asr/ 或 QX_ASR_MODEL_DIR 加载；新版本使用独立目录避免混用旧资源。
 
     // 候选释放目录：先系统临时目录，再 exe 同级目录。
     let temp_dir = std::env::temp_dir();
@@ -70,21 +70,20 @@ fn extract_bundle() -> PathBuf {
         }
     }
 
-    // 清理临时目录下的旧版本残留目录（如 qx-guide-bundle-v8 等），避免旧 DLL 干扰新版
-    if let Ok(entries) = temp_dir.read_dir() {
-        for entry in entries.flatten() {
-            let name = entry.file_name().to_string_lossy().to_string();
-            if name.starts_with("qx-guide-bundle-") && name != BUNDLE_DIR_NAME {
-                let _ = std::fs::remove_dir_all(entry.path());
-            }
-        }
-    }
+    // 不自动删除其他版本的 bundle：另一个仍在运行的实例可能正在使用它。
+    // 版本化目录已避免新旧资源混用；旧目录由用户或系统清理。
 
     for base in &candidates {
         let dir = base.join(BUNDLE_DIR_NAME);
         // 先尝试建目录；建不出来说明该位置不可写，跳到下一个候选。
         if let Err(e) = fs::create_dir_all(&dir) {
             tracing::warn!(error = %e, path = %dir.display(), "释放目录不可写，尝试下一个候选位置");
+            continue;
+        }
+        // 再用探针文件确认目录真的可写：目录已存在但个别文件被锁/只读时，
+        // 逐文件写盘会在中途失败；先探测一次，失败就整体跳到下一个候选。
+        if !bundle_dir_writable(&dir) {
+            tracing::warn!(path = %dir.display(), "释放目录不可写，尝试下一个候选位置");
             continue;
         }
         if extract_into(&dir) {
@@ -98,6 +97,23 @@ fn extract_bundle() -> PathBuf {
     let fallback = temp_dir.join(BUNDLE_DIR_NAME);
     tracing::error!(path = %fallback.display(), "所有候选释放位置均失败，回退到临时目录");
     fallback
+}
+
+/// 用探针文件确认释放目录可写。目录已存在但个别文件被锁/只读时，
+/// 逐文件写盘会在中途失败；先探测一次，失败就整体跳到下一个候选位置。
+fn bundle_dir_writable(dir: &Path) -> bool {
+    let probe = dir.join(format!(".qx-bundle-probe-{}", std::process::id()));
+    match std::fs::OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(&probe)
+    {
+        Ok(_) => {
+            let _ = fs::remove_file(&probe);
+            true
+        }
+        Err(_) => false,
+    }
 }
 
 /// 把内嵌资产解压到指定目录，返回是否成功（解压过程中是否有写盘错误）。
@@ -151,8 +167,8 @@ fn extract_into(dir: &Path) -> bool {
                     }
                 }
                 Err(e) => {
-                    tracing::error!(error = %e, path = %out.display(), "创建文件失败");
-                    ok = false;
+                    tracing::error!(error = %e, path = %out.display(), "创建文件失败，跳过该释放位置");
+                    return false;
                 }
             }
         }
@@ -168,7 +184,10 @@ pub struct AppView {
 impl Render for AppView {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         // 全屏 WebView：与网页版外观一致（窗口自带标题栏用于关闭/缩放）。
-        div().size_full().bg(rgb(0x0c0a08)).child(self.webview.clone())
+        div()
+            .size_full()
+            .bg(rgb(0x0c0a08))
+            .child(self.webview.clone())
     }
 }
 
@@ -218,7 +237,7 @@ fn main() {
     while i < args.len() {
         match args[i].as_str() {
             "--bake-voices" => {
-                // 赛前联网跑一次：把现场会说的每句话固化成小伊原声。
+                // 赛前跑一次：用本地 Piper 把演示语音固化到预生成目录。
                 bake_voices = true;
                 i += 1;
             }
@@ -276,8 +295,8 @@ fn main() {
     {
         // 只有非空且非 0 才算「关闭」；空值（例如脚本里误写 QX_NO_EMBEDDED_MODEL=）
         // 不应把内嵌模型关掉。
-        let no_embed = std::env::var("QX_NO_EMBEDDED_MODEL")
-            .is_ok_and(|v| !v.is_empty() && v != "0");
+        let no_embed =
+            std::env::var("QX_NO_EMBEDDED_MODEL").is_ok_and(|v| !v.is_empty() && v != "0");
         if cfg.local_model.is_none() && !no_embed {
             if let Some(m) = crate::embedded_model::release() {
                 cfg.backend = http::LlmBackend::Local;
@@ -326,7 +345,7 @@ fn main() {
         return;
     }
 
-    // 赛前「离线小伊」烘焙：不建窗口、不起 HTTP，只联网合成语音并写报告文件
+    // 离线 Piper 语音烘焙：不建窗口、不起 HTTP，只合成语音并写报告文件
     // （GUI 子系统进程没有控制台，stdout 不可见，报告落盘才可核对）。
     // 默认写回编译时的源码根 qx-rust/；换机器可用 QX_VOICE_BAKE_DIR 指过去。
     if bake_voices {
@@ -371,28 +390,30 @@ fn main() {
     let app = gpui_kit::platform::linux(gpui_kit::WindowingModes::X11);
     #[cfg(not(target_os = "linux"))]
     let app = gpui_kit::application();
-    app.with_assets(gpui_kit::assets::Assets)
-        .run(move |cx| {
-            gpui_kit::init(cx);
-            let bounds = Bounds::centered(None, size(px(1440.), px(900.)), cx);
-            let options = WindowOptions {
-                window_bounds: Some(WindowBounds::Windowed(bounds)),
-                #[cfg(windows)]
-                titlebar: Some(TitlebarOptions {
-                    title: Some(TITLE.into()),
-                    ..Default::default()
-                }),
+    app.with_assets(gpui_kit::assets::Assets).run(move |cx| {
+        gpui_kit::init(cx);
+        let bounds = Bounds::centered(None, size(px(1440.), px(900.)), cx);
+        let options = WindowOptions {
+            window_bounds: Some(WindowBounds::Windowed(bounds)),
+            #[cfg(windows)]
+            titlebar: Some(TitlebarOptions {
+                title: Some(TITLE.into()),
                 ..Default::default()
-            };
-            gpui_kit::open_window(options, cx, move |window, cx| {
-                let webview = cx.new(|cx| {
-                    WebView::build(wry::WebViewBuilder::new(), window, cx)
-                        .expect("无法创建 WebView2 视图")
-                });
-                webview.update(cx, |view, _| view.load_url(&url));
-                cx.new(|_| AppView { webview, url: for_window })
+            }),
+            ..Default::default()
+        };
+        gpui_kit::open_window(options, cx, move |window, cx| {
+            let webview = cx.new(|cx| {
+                WebView::build(wry::WebViewBuilder::new(), window, cx)
+                    .expect("无法创建 WebView2 视图")
+            });
+            webview.update(cx, |view, _| view.load_url(&url));
+            cx.new(|_| AppView {
+                webview,
+                url: for_window,
             })
-            .expect("无法打开窗口");
-        });
+        })
+        .expect("无法打开窗口");
+    });
     tracing::info!("桌面端已正常退出");
 }

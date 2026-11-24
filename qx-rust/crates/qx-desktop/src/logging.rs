@@ -36,6 +36,10 @@ const RETENTION: Duration = Duration::from_secs(14 * 24 * 60 * 60);
 
 static LOG_DIR: OnceLock<PathBuf> = OnceLock::new();
 
+/// 当前正在写入的日志文件路径（由 [`init`] 在预创建后固定）。
+/// 供 `/api/stats` 直接展示真实文件，避免依赖目录扫描。
+static LOG_FILE: OnceLock<PathBuf> = OnceLock::new();
+
 /// 日志 guard：必须活到进程结束，否则写入线程可能还有日志没落盘。
 pub struct LogGuard {
     /// 持有 sender：Drop 时 channel 关闭，写入线程 `recv` 出错后退出。
@@ -44,8 +48,9 @@ pub struct LogGuard {
 
 /// 初始化全局日志与 panic hook。应尽早调用，且只调用一次。
 pub fn init() -> LogGuard {
-    let dir = prepare_dir();
+    let (dir, file) = prepare_dir();
     let _ = LOG_DIR.set(dir.clone());
+    let _ = LOG_FILE.set(file.clone());
 
     let writer = spawn_file_writer(dir.clone());
     let file_layer = FileLayer { writer: writer.clone() };
@@ -80,8 +85,17 @@ pub fn dir() -> Option<&'static Path> {
     LOG_DIR.get().map(PathBuf::as_path)
 }
 
-/// 当前最新的日志文件（按修改时间取最新），供自检面板展示。
+/// 当前正在写入的日志文件，供 `/api/stats` 与自检面板展示。
+pub fn current_file() -> Option<&'static Path> {
+    LOG_FILE.get().map(PathBuf::as_path)
+}
+
+/// 当前最新的日志文件。优先返回预创建并固定下来的当天文件；
+/// 若尚未初始化，则回退到按目录扫描取最新。
 pub fn latest_file() -> Option<PathBuf> {
+    if let Some(file) = LOG_FILE.get() {
+        return Some(file.clone());
+    }
     let dir = dir()?;
     std::fs::read_dir(dir)
         .ok()?
@@ -223,24 +237,58 @@ fn today() -> String {
 // 目录管理（保留自原实现）
 // ---------------------------------------------------------------------------
 
-/// 目录优先级：`QX_LOG_DIR` > 平台用户数据目录 > 临时目录。
-/// 首选目录不可写时自动退到临时目录，保证日志系统不会挡住启动。
-fn prepare_dir() -> PathBuf {
-    let preferred = std::env::var_os("QX_LOG_DIR")
-        .filter(|v| !v.is_empty())
-        .map(PathBuf::from)
-        .or_else(default_data_dir)
-        .unwrap_or_else(|| std::env::temp_dir().join("QiaoxiangGuide").join("logs"));
+/// 日志文件名：`qx-guide.log.{date}`。
+fn file_for(dir: &Path, date: &str) -> PathBuf {
+    dir.join(format!("{LOG_PREFIX}.{date}"))
+}
 
-    if writable_dir(&preferred) {
-        cleanup_old_logs(&preferred);
-        return preferred;
+/// 目录优先级：`QX_LOG_DIR` > 平台用户数据目录 > 临时目录。
+/// 返回实际选定的目录和当天日志文件。每个候选都会同步预创建当天日志文件，
+/// 目录不可写或文件被锁时立即换下一个，避免异步写入线程首次打开才报 ENOENT。
+fn prepare_dir() -> (PathBuf, PathBuf) {
+    let mut candidates = Vec::new();
+    if let Some(v) = std::env::var_os("QX_LOG_DIR").filter(|v| !v.is_empty()) {
+        candidates.push(PathBuf::from(v));
+    }
+    if let Some(d) = default_data_dir() {
+        if !candidates.contains(&d) {
+            candidates.push(d);
+        }
+    }
+    let fallback = std::env::temp_dir().join("QiaoxiangGuide").join("logs");
+    if !candidates.contains(&fallback) {
+        candidates.push(fallback.clone());
     }
 
-    let fallback = std::env::temp_dir().join("QiaoxiangGuide").join("logs");
+    for dir in &candidates {
+        if let Some(file) = try_log_dir(dir) {
+            cleanup_old_logs(dir);
+            return (dir.clone(), file);
+        }
+        tracing::warn!(path = %dir.display(), "日志目录不可写，尝试下一个候选位置");
+    }
+
+    // 所有候选都不可用时仍返回临时目录，写入线程会以 stdout 兜底，不阻断启动。
     let _ = std::fs::create_dir_all(&fallback);
-    cleanup_old_logs(&fallback);
-    fallback
+    let file = file_for(&fallback, &today());
+    (fallback, file)
+}
+
+/// 创建并验证一个日志目录：建目录后同步预创建当天日志文件（追加模式，
+/// 不截断已有内容），成功才认为该目录可用。
+fn try_log_dir(dir: &Path) -> Option<PathBuf> {
+    if std::fs::create_dir_all(dir).is_err() {
+        return None;
+    }
+    let file = file_for(dir, &today());
+    match std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&file)
+    {
+        Ok(_) => Some(file),
+        Err(_) => None,
+    }
 }
 
 /// 平台默认的用户数据日志目录，不区分可写性（后面用探针文件统一验证）。
@@ -259,26 +307,6 @@ fn default_data_dir() -> Option<PathBuf> {
     std::env::var_os("HOME").filter(|v| !v.is_empty()).map(|h| {
         PathBuf::from(h).join(".local").join("share").join("QiaoxiangGuide").join("logs")
     })
-}
-
-/// 不能只看 `create_dir_all`：目录已存在但只读时它同样返回 Ok，
-/// 真正开写才会失败。这里用探针文件确认可写，再决定是否回退到临时目录。
-fn writable_dir(dir: &Path) -> bool {
-    if std::fs::create_dir_all(dir).is_err() {
-        return false;
-    }
-    let probe = dir.join(format!(".qx-log-probe-{}", std::process::id()));
-    match std::fs::OpenOptions::new()
-        .create_new(true)
-        .write(true)
-        .open(&probe)
-    {
-        Ok(_) => {
-            let _ = std::fs::remove_file(&probe);
-            true
-        }
-        Err(_) => false,
-    }
 }
 
 /// 删除 14 天前的旧日志；只碰本程序前缀，避免清理共享目录里的其他文件。
